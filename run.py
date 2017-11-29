@@ -16,7 +16,13 @@ from keras.layers.advanced_activations import LeakyReLU
 from keras.optimizers import Nadam, Adam
 from keras import regularizers
 
-import preprocess
+import sys
+sys.path.insert(0,'./DenseNet/')
+
+import numpy as np
+import pandas as pd
+
+from DenseNet import * 
 
 # Which network
 name = 'v1' 
@@ -175,7 +181,7 @@ def main(args):
     window_size = 2048
 
     # Preprocess data
-    timeseries = preprocess.preprocess('TODO PATH HERE')
+    timeseries = preprocess('big.txt')
     print(timeseries.shape)
 
     X_train, y_train, X_test, y_test, q = load_data(timeseries, window_size)
@@ -198,7 +204,48 @@ def confusion():
     C = confusion_matrix([np.argmax(y) for y in Y_test], [np.argmax(y) for y in pred])
     print(C / C.astype(np.float).sum(axis=1))
 
+def normalize(data):
+    temp = np.float32(data) - np.min(data)
+    out = (temp / np.max(temp) - 0.5) * 2
+    return out
+
+
+def preprocess(path):
+    data = pd.read_csv(path, sep='\t').get_values()[:, 1:]
+
+    c = np.diff(data[:, 0]) / (np.abs(data[:-1, 0])) * 100
+    h = np.diff(data[:, 1]) / (np.abs(data[:-1, 1])) * 100
+    l = np.diff(data[:, 2]) / (np.abs(data[:-1, 2])) * 100
+    o = np.diff(data[:, 3]) / (np.abs(data[:-1, 3])) * 100
+    qv = data[:, 4]
+    v = data[:, 5]
+    wa = np.diff(data[:, 6]) / (np.abs(data[:-1, 6])) * 100
+
+    # Max
+    for data in [c, h, l, o, qv, v, wa]:
+      std_dev = np.std(data)
+      print("Std Dev: \t" + str(std_dev))
+      print("Max: \t\t" + str(max(data)))
+      print("Min: \t\t" + str(min(data)))
+      data[data > 3*std_dev] = 3*std_dev
+      data[data < 3*-std_dev] = 3*-std_dev
+      print(max(data))
+      print(min(data))
+
+    print(data)
+    return data
+
+def textify():
+    from fastText import load_model
+
+    f = load_model('wiki.en.bin')
+
+    print(f.get_word_vector("London"))
+    print(f.get_word_vector("London").shape)
 
 if __name__ == '__main__':
+    image_dim = (224, 224, 3)
+    model = DenseNet(classes=10, input_shape=image_dim, depth=40, growth_rate=12, 
+            bottleneck=True, reduction=0.5)
     args = parse_arg()
     main(args)

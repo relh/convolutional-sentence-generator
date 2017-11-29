@@ -1,0 +1,6 @@
+[submodule "fastText"]
+	path = fastText
+	url = https://github.com/facebookresearch/fastText
+[submodule "DenseNet"]
+	path = DenseNet
+	url = https://github.com/relh/DenseNet
