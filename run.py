@@ -1,91 +1,16 @@
-#!/usr/bin/env python
-"""
-Example of using Keras to implement a 1D convolutional neural network (CNN) for timeseries prediction.
-"""
+from __future__ import print_function
 
-from __future__ import print_function, division
-
-import argparse
 import os
+import time
+import json
+import argparse
+import densenet
 import numpy as np
-from keras.models import Sequential, Model, load_model
-from keras.callbacks import ReduceLROnPlateau, Callback, ModelCheckpoint
-from keras.layers import Conv1D, AtrousConv1D, Flatten, Dense, \
-    Input, Lambda, merge, Activation, MaxPooling1D, BatchNormalization, Dropout
-from keras.layers.advanced_activations import LeakyReLU
-from keras.optimizers import Nadam, Adam
-from keras import regularizers
+import keras.backend as K
 
-import sys
-sys.path.insert(0,'./DenseNet/')
-
-import numpy as np
-import pandas as pd
-
-from DenseNet import * 
-
-# Which network
-name = 'v1' 
-
-#lr_reducer = ReduceLROnPlateau(factor=np.sqrt(0.1), cooldown=0, patience=5, min_lr=0.5e-6)
-lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
-checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-
-
-def parse_arg(): # parses all the command line arguments
-    parser = argparse.ArgumentParser('nlp')
-    parser.add_argument('mode', type=str, default='train', help='mode')
-    args = parser.parse_args()
-    return args
-
-
-def wavenetBlock(n_atrous_filters, atrous_filter_size, dilation_rate):
-    def f(input_):
-        residual = input_
-        tanh_out = AtrousConv1D(n_atrous_filters, atrous_filter_size,
-                                       dilation_rate=dilation_rate,
-                                       padding='same',
-                                       activation='tanh',
-                                       kernel_regularizer=regularizers.l2(0.01),
-                                       activity_regularizer=regularizers.l1(0.01))(input_)
-        sigmoid_out = AtrousConv1D(n_atrous_filters, atrous_filter_size,
-                                       dilation_rate=dilation_rate,
-                                       padding='same',
-                                       activation='sigmoid',
-                                       kernel_regularizer=regularizers.l2(0.01),
-                                       activity_regularizer=regularizers.l1(0.01))(input_)
-        tanh_out = Dropout(0.3)(tanh_out)
-        sigmoid_out = Dropout(0.3)(sigmoid_out)
-        merged = merge([tanh_out, sigmoid_out], mode='mul')
-        skip_out = Conv1D(1, 1, activation='relu', padding='same')(merged)
-        out = merge([skip_out, residual], mode='sum')
-        return out, skip_out
-    return f
-
-def get_basic_generative_model(input_size):
-    input_ = Input(shape=(input_size, 1))
-    A, B = wavenetBlock(64, 10, 2)(input_) #5
-    skip_connections = [B]
-    for i in range(15):
-        A, B = wavenetBlock(64, 4, 2**((i+2)%9))(A)
-        skip_connections.append(B)
-    net = merge(skip_connections, mode='sum')
-    net = Activation('relu')(net)
-    net = Conv1D(1, 1)(net) # activation='relu'
-    net = BatchNormalization()(net)
-    net = LeakyReLU()(net)
-    net = Conv1D(1, 1)(net)
-    net = BatchNormalization()(net)
-    net = LeakyReLU()(net)
-    net = Flatten()(net)
-    net = Dense(2, activation='softmax')(net)
-    model = Model(input=input_, output=net)
-    opt = Nadam(lr=0.002)
-    #model.compile(loss='mse', optimizer=opt, metrics=['mae', 'accuracy'])
-    model.compile(loss='categorical_crossentropy', optimizer=opt,
-                  metrics=['accuracy'])
-    model.summary()
-    return model
+from keras.datasets import cifar10
+from keras.optimizers import Adam
+from keras.utils import np_utils
 
 
 def make_timeseries_instances(timeseries, window_size):
@@ -111,13 +36,6 @@ def make_timeseries_instances(timeseries, window_size):
     q = np.atleast_3d([timeseries[-window_size:]])
     return X, y, q
 
-def load_network(window_size):
-    if os.path.exists(name+'.h5'):
-      model = load_model(name+'.h5')
-    else:
-      model = get_basic_generative_model(window_size)
-    print('\n\nModel with input size {}'.format(model.input_shape))
-    return model
 
 def load_data(timeseries, window_size):
     timeseries = np.atleast_2d(timeseries)
@@ -134,118 +52,245 @@ def load_data(timeseries, window_size):
 
     # Make binary problem
     #print([x for x in X_test])
-    y_train = [[1,0] if x >= 0 else [0,1] for x in y_train]
+    #y_train = [[1,0] if x >= 0 else [0,1] for x in y_train]
     print(y_test.shape)
-    y_test = [[1,0] if x >= 0 else [0,1] for x in y_test]
+    #y_test = [[1,0] if x >= 0 else [0,1] for x in y_test]
 
+    X_train = np.expand_dims(X_train, axis=2)
+    X_test = np.expand_dims(X_test, axis=2)
     #y_train = y_train.reshape((-1, 1))
     #y_test = y_test.reshape((-1, 1))
     q = np.atleast_3d([timeseries[-window_size:]])
 
-
-    """
-    X_test[X_test > 0] = [1, 0]
-    X_test[X_test < 0] = [0, 1]
-    y_test[y_test > 0] = [1, 0]
-    y_test[y_test < 0] = [0, 1]
-    """
-    print(X_test)
     return X_train, y_train, X_test, y_test, q
 
-def train(model, X_train, y_train, X_test, y_test, q):
-    """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
-    as input features and evaluate its performance.
 
-    :param ndarray timeseries: Timeseries data with time increasing down the rows (the leading dimension/axis).
-    :param int window_size: The number of previous timeseries values to use to predict the next.
+def preprocess(path):
+    with open(path) as f:
+      lines = f.readlines()
+
+    if os.path.exists('vecs.npy'):
+      npvecs = np.load('vecs.npy')
+    else:
+      words = ' '.join(lines[:1000]).replace('\n', ' ') # just first 1000
+      words = nltk.word_tokenize(words)
+      words = [x for x in words if len(x) > 0]
+      print(words)
+      print(len(words))
+      
+      f = load_model('wiki.en.bin')
+
+      vecs = []
+      for w in words:
+          vec = f.get_word_vector(w)
+          vecs.append(vec) 
+          print((w, vec))
+
+      npvecs = np.asarray(vecs)
+      np.save('vecs', npvecs)
+
+    print(npvecs.shape)
+    return npvecs
+
+
+def run(batch_size,
+                nb_epoch,
+                depth,
+                nb_dense_block,
+                nb_filter,
+                growth_rate,
+                dropout_rate,
+                learning_rate,
+                weight_decay,
+                plot_architecture):
+    """ Run Conv NLP experiments
+
+    :param batch_size: int -- batch size
+    :param nb_epoch: int -- number of training epochs
+    :param depth: int -- network depth
+    :param nb_dense_block: int -- number of dense blocks
+    :param nb_filter: int -- initial number of conv filter
+    :param growth_rate: int -- number of new filters added by conv layers
+    :param dropout_rate: float -- dropout rate
+    :param learning_rate: float -- learning rate
+    :param weight_decay: float -- weight decay
+    :param plot_architecture: bool -- whether to plot network architecture
+
     """
-    model.fit(X_train, y_train, epochs=10, batch_size=64, validation_data=(X_test, y_test), callbacks=[lr_reducer, checkpointer], shuffle=True)
-    model.save(name+'.h5')
 
-    #test(X_train, y_train, X_test, y_test, q)
+    ###################
+    # Data processing #
+    ###################
 
-def test(model, X_train, y_train, X_test, y_test, q):
-    pred = model.predict(X_test)
-    print('\n\nactual', 'predicted', sep='\t')
-    with open('out.csv', 'w') as f:
-      for actual, predicted in zip(y_test, pred.squeeze()):
-        f.write(str(actual)+',') 
-        f.write(str(predicted)+'\n')
-        print(actual.squeeze(), predicted, sep='\t')
-    print('next', model.predict(q).squeeze(), sep='\t')
-
-
-def main(args):
-    """Prepare input data, build model, evaluate."""
-    np.set_printoptions(threshold=25)
-    window_size = 2048
-
-    # Preprocess data
+    window_size = 100 
     timeseries = preprocess('big.txt')
     print(timeseries.shape)
 
     X_train, y_train, X_test, y_test, q = load_data(timeseries, window_size)
+    print(X_train.shape)
+    print(y_train.shape)
 
-    print('\nSimple single timeseries vector prediction')
-    # Load model
-    model = load_network(window_size)
+    print('---')
+    # the data, shuffled and split between train and test sets
+    (X_train, y_train), (X_test, y_test) = cifar10.load_data()
+    print(X_train.shape)
+    print(y_train.shape)
 
-    print(args.mode)
-    if True or args.mode is "train":
-      train(model, X_train, y_train, X_test, y_test, q)
+    nb_classes = len(np.unique(y_train))
+    img_dim = X_train.shape[1:]
+
+    if K.image_data_format() == "channels_first":
+        n_channels = X_train.shape[1]
     else:
-      test(model, X_train, y_train, X_test, y_test, q)
+        n_channels = X_train.shape[-1]
 
-def confusion():
-    from sklearn.metrics import classification_report
-    from sklearn.metrics import confusion_matrix
-    model.load_weights(name+'.h5')
-    pred = model.predict(np.array(X_test))
-    C = confusion_matrix([np.argmax(y) for y in Y_test], [np.argmax(y) for y in pred])
-    print(C / C.astype(np.float).sum(axis=1))
+    # convert class vectors to binary class matrices
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
 
-def normalize(data):
-    temp = np.float32(data) - np.min(data)
-    out = (temp / np.max(temp) - 0.5) * 2
-    return out
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
 
+    # Normalisation
+    X = np.vstack((X_train, X_test))
+    # 2 cases depending on the image ordering
+    if K.image_data_format() == "channels_first":
+        for i in range(n_channels):
+            mean = np.mean(X[:, i, :, :])
+            std = np.std(X[:, i, :, :])
+            X_train[:, i, :, :] = (X_train[:, i, :, :] - mean) / std
+            X_test[:, i, :, :] = (X_test[:, i, :, :] - mean) / std
 
-def preprocess(path):
-    data = pd.read_csv(path, sep='\t').get_values()[:, 1:]
+    elif K.image_data_format() == "channels_last":
+        for i in range(n_channels):
+            mean = np.mean(X[:, :, :, i])
+            std = np.std(X[:, :, :, i])
+            X_train[:, :, :, i] = (X_train[:, :, :, i] - mean) / std
+            X_test[:, :, :, i] = (X_test[:, :, :, i] - mean) / std
 
-    c = np.diff(data[:, 0]) / (np.abs(data[:-1, 0])) * 100
-    h = np.diff(data[:, 1]) / (np.abs(data[:-1, 1])) * 100
-    l = np.diff(data[:, 2]) / (np.abs(data[:-1, 2])) * 100
-    o = np.diff(data[:, 3]) / (np.abs(data[:-1, 3])) * 100
-    qv = data[:, 4]
-    v = data[:, 5]
-    wa = np.diff(data[:, 6]) / (np.abs(data[:-1, 6])) * 100
+    ###################
+    # Construct model #
+    ###################
 
-    # Max
-    for data in [c, h, l, o, qv, v, wa]:
-      std_dev = np.std(data)
-      print("Std Dev: \t" + str(std_dev))
-      print("Max: \t\t" + str(max(data)))
-      print("Min: \t\t" + str(min(data)))
-      data[data > 3*std_dev] = 3*std_dev
-      data[data < 3*-std_dev] = 3*-std_dev
-      print(max(data))
-      print(min(data))
+    model = densenet.DenseNet(nb_classes,
+                              img_dim,
+                              depth,
+                              nb_dense_block,
+                              growth_rate,
+                              nb_filter,
+                              dropout_rate=dropout_rate,
+                              weight_decay=weight_decay)
+    # Model output
+    model.summary()
 
-    print(data)
-    return data
+    # Build optimizer
+    opt = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
 
-def textify():
-    from fastText import load_model
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=opt,
+                  metrics=["accuracy"])
 
-    f = load_model('wiki.en.bin')
+    if plot_architecture:
+        from keras.utils.visualize_util import plot
+        plot(model, to_file='./figures/densenet_archi.png', show_shapes=True)
 
-    print(f.get_word_vector("London"))
-    print(f.get_word_vector("London").shape)
+    ####################
+    # Network training #
+    ####################
+
+    print("Training")
+
+    list_train_loss = []
+    list_test_loss = []
+    list_learning_rate = []
+
+    for e in range(nb_epoch):
+
+        if e == int(0.5 * nb_epoch):
+            K.set_value(model.optimizer.lr, np.float32(learning_rate / 10.))
+
+        if e == int(0.75 * nb_epoch):
+            K.set_value(model.optimizer.lr, np.float32(learning_rate / 100.))
+
+        split_size = batch_size
+        num_splits = X_train.shape[0] / split_size
+        arr_splits = np.array_split(np.arange(X_train.shape[0]), num_splits)
+
+        l_train_loss = []
+        start = time.time()
+
+        for batch_idx in arr_splits:
+
+            X_batch, Y_batch = X_train[batch_idx], Y_train[batch_idx]
+            train_logloss, train_acc = model.train_on_batch(X_batch, Y_batch)
+
+            l_train_loss.append([train_logloss, train_acc])
+
+        test_logloss, test_acc = model.evaluate(X_test,
+                                                Y_test,
+                                                verbose=0,
+                                                batch_size=64)
+        list_train_loss.append(np.mean(np.array(l_train_loss), 0).tolist())
+        list_test_loss.append([test_logloss, test_acc])
+        list_learning_rate.append(float(K.get_value(model.optimizer.lr)))
+        # to convert numpy array to json serializable
+        print('Epoch %s/%s, Time: %s' % (e + 1, nb_epoch, time.time() - start))
+
+        d_log = {}
+        d_log["batch_size"] = batch_size
+        d_log["nb_epoch"] = nb_epoch
+        d_log["optimizer"] = opt.get_config()
+        d_log["train_loss"] = list_train_loss
+        d_log["test_loss"] = list_test_loss
+        d_log["learning_rate"] = list_learning_rate
+
+        json_file = os.path.join('./log/experiment_log_cifar10.json')
+        with open(json_file, 'w') as fp:
+            json.dump(d_log, fp, indent=4, sort_keys=True)
+
 
 if __name__ == '__main__':
-    image_dim = (224, 224, 3)
-    model = DenseNet(classes=10, input_shape=image_dim, depth=40, growth_rate=12, 
-            bottleneck=True, reduction=0.5)
-    args = parse_arg()
-    main(args)
+
+    parser = argparse.ArgumentParser(description='Run NLP experiment')
+    parser.add_argument('--batch_size', default=64, type=int,
+                        help='Batch size')
+    parser.add_argument('--nb_epoch', default=30, type=int,
+                        help='Number of epochs')
+    parser.add_argument('--depth', type=int, default=7,
+                        help='Network depth')
+    parser.add_argument('--nb_dense_block', type=int, default=1,
+                        help='Number of dense blocks')
+    parser.add_argument('--nb_filter', type=int, default=16,
+                        help='Initial number of conv filters')
+    parser.add_argument('--growth_rate', type=int, default=12,
+                        help='Number of new filters added by conv layers')
+    parser.add_argument('--dropout_rate', type=float, default=0.2,
+                        help='Dropout rate')
+    parser.add_argument('--learning_rate', type=float, default=1E-3,
+                        help='Learning rate')
+    parser.add_argument('--weight_decay', type=float, default=1E-4,
+                        help='L2 regularization on weights')
+    parser.add_argument('--plot_architecture', type=bool, default=False,
+                        help='Save a plot of the network architecture')
+
+    args = parser.parse_args()
+
+    print("Network configuration:")
+    for name, value in parser.parse_args()._get_kwargs():
+        print(name, value)
+
+    list_dir = ["./log", "./figures"]
+    for d in list_dir:
+        if not os.path.exists(d):
+            os.makedirs(d)
+
+    run(args.batch_size,
+                args.nb_epoch,
+                args.depth,
+                args.nb_dense_block,
+                args.nb_filter,
+                args.growth_rate,
+                args.dropout_rate,
+                args.learning_rate,
+                args.weight_decay,
+                args.plot_architecture)
