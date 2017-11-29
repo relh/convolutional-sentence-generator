@@ -183,7 +183,7 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
     x = Activation('relu')(x)
     x = GlobalAveragePooling2D(data_format=K.image_data_format())(x)
     x = Dense(nb_classes,
-              activation='softmax',
+              activation='sigmoid',
               kernel_regularizer=l2(weight_decay),
               bias_regularizer=l2(weight_decay))(x)
 

@@ -8,7 +8,6 @@ import densenet
 import numpy as np
 import keras.backend as K
 
-from keras.datasets import cifar10
 from keras.optimizers import Adam
 from keras.utils import np_utils
 
@@ -56,8 +55,8 @@ def load_data(timeseries, window_size):
     print(y_test.shape)
     #y_test = [[1,0] if x >= 0 else [0,1] for x in y_test]
 
-    X_train = np.expand_dims(X_train, axis=2)
-    X_test = np.expand_dims(X_test, axis=2)
+    X_train = np.expand_dims(X_train, axis=3)
+    X_test = np.expand_dims(X_test, axis=3)
     #y_train = y_train.reshape((-1, 1))
     #y_test = y_test.reshape((-1, 1))
     q = np.atleast_3d([timeseries[-window_size:]])
@@ -131,12 +130,8 @@ def run(batch_size,
     print(y_train.shape)
 
     print('---')
-    # the data, shuffled and split between train and test sets
-    (X_train, y_train), (X_test, y_test) = cifar10.load_data()
-    print(X_train.shape)
-    print(y_train.shape)
 
-    nb_classes = len(np.unique(y_train))
+    nb_classes = 300 #len(np.unique(y_train))
     img_dim = X_train.shape[1:]
 
     if K.image_data_format() == "channels_first":
@@ -145,8 +140,8 @@ def run(batch_size,
         n_channels = X_train.shape[-1]
 
     # convert class vectors to binary class matrices
-    Y_train = np_utils.to_categorical(y_train, nb_classes)
-    Y_test = np_utils.to_categorical(y_test, nb_classes)
+    Y_train = y_train #np_utils.to_categorical(y_train, nb_classes)
+    Y_test = y_test #np_utils.to_categorical(y_test, nb_classes)
 
     X_train = X_train.astype('float32')
     X_test = X_test.astype('float32')
@@ -154,6 +149,7 @@ def run(batch_size,
     # Normalisation
     X = np.vstack((X_train, X_test))
     # 2 cases depending on the image ordering
+    """
     if K.image_data_format() == "channels_first":
         for i in range(n_channels):
             mean = np.mean(X[:, i, :, :])
@@ -167,6 +163,7 @@ def run(batch_size,
             std = np.std(X[:, :, :, i])
             X_train[:, :, :, i] = (X_train[:, :, :, i] - mean) / std
             X_test[:, :, :, i] = (X_test[:, :, :, i] - mean) / std
+    """
 
     ###################
     # Construct model #
@@ -186,7 +183,7 @@ def run(batch_size,
     # Build optimizer
     opt = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
 
-    model.compile(loss='categorical_crossentropy',
+    model.compile(loss='mse',
                   optimizer=opt,
                   metrics=["accuracy"])
 
@@ -244,7 +241,7 @@ def run(batch_size,
         d_log["test_loss"] = list_test_loss
         d_log["learning_rate"] = list_learning_rate
 
-        json_file = os.path.join('./log/experiment_log_cifar10.json')
+        json_file = os.path.join('./log/experiment_log_nlp_100.json')
         with open(json_file, 'w') as fp:
             json.dump(d_log, fp, indent=4, sort_keys=True)
 
@@ -252,7 +249,7 @@ def run(batch_size,
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=16, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=30, type=int,
                         help='Number of epochs')
