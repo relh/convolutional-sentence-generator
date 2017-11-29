@@ -8,8 +8,13 @@ import densenet
 import numpy as np
 import keras.backend as K
 
+from keras.callbacks import ReduceLROnPlateau, Callback, ModelCheckpoint
 from keras.optimizers import Adam
 from keras.utils import np_utils
+
+name = 'v1'
+lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
+checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
 
 
 def make_timeseries_instances(timeseries, window_size):
@@ -182,10 +187,11 @@ def run(batch_size,
 
     # Build optimizer
     opt = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+    #opt = Nadam(lr=0.002)
 
     model.compile(loss='mse',
                   optimizer=opt,
-                  metrics=["accuracy"])
+                  metrics=['mae', 'accuracy'])
 
     if plot_architecture:
         from keras.utils.visualize_util import plot
@@ -195,6 +201,32 @@ def run(batch_size,
     # Network training #
     ####################
 
+    train(model, X_train, y_train, X_test, y_test, q, args)
+
+
+def train(model, X_train, y_train, X_test, y_test, q, args):
+    """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
+    as input features and evaluate its performance.
+
+    :param ndarray timeseries: Timeseries data with time increasing down the rows (the leading dimension/axis).
+    :param int window_size: The number of previous timeseries values to use to predict the next.
+    """
+    model.fit(X_train, y_train, epochs=args.nb_epoch, batch_size=args.batch_size, validation_data=(X_test, y_test), callbacks=[lr_reducer, checkpointer], shuffle=True)
+    model.save(name+'.h5')
+
+    #test(X_train, y_train, X_test, y_test, q)
+
+def test(model, X_train, y_train, X_test, y_test, q):
+    pred = model.predict(X_test)
+    print('\n\nactual', 'predicted', sep='\t')
+    with open('out.csv', 'w') as f:
+      for actual, predicted in zip(y_test, pred.squeeze()):
+        f.write(str(actual)+',') 
+        f.write(str(predicted)+'\n')
+        print(actual.squeeze(), predicted, sep='\t')
+    print('next', model.predict(q).squeeze(), sep='\t')
+
+def train_old():
     print("Training")
 
     list_train_loss = []
@@ -251,7 +283,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run NLP experiment')
     parser.add_argument('--batch_size', default=16, type=int,
                         help='Batch size')
-    parser.add_argument('--nb_epoch', default=30, type=int,
+    parser.add_argument('--nb_epoch', default=10, type=int,
                         help='Number of epochs')
     parser.add_argument('--depth', type=int, default=7,
                         help='Network depth')
