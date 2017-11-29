@@ -70,13 +70,16 @@ def preprocess(path):
       words = ' '.join(lines).replace('\n', ' ') # lines[:1000] just first 1000
       words = nltk.word_tokenize(words)
       words = [x for x in words if len(x) > 0]
+      words_len = len(words)
       
       f = load_model('wiki.en.bin')
 
       vecs = []
-      for w in words:
+      for i, w in enumerate(words):
           vec = f.get_word_vector(w)
           vecs.append(vec) 
+          if i % 1000 == 0:
+            print("{} / {}".format(i, words_len))
 
       npvecs = np.asarray(vecs)
       np.save('big_vecs', npvecs)
