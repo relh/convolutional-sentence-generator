@@ -225,11 +225,6 @@ if __name__ == '__main__':
     for name, value in parser.parse_args()._get_kwargs():
         print(name, value)
 
-    list_dir = ["./log", "./figures"]
-    for d in list_dir:
-        if not os.path.exists(d):
-            os.makedirs(d)
-
     run(args.batch_size,
                 args.nb_epoch,
                 args.depth,
