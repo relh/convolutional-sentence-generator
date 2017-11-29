@@ -12,6 +12,9 @@ from keras.callbacks import ReduceLROnPlateau, Callback, ModelCheckpoint
 from keras.optimizers import Adam
 from keras.utils import np_utils
 
+import nltk
+from fastText import load_model
+
 name = 'v1'
 lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -61,14 +64,12 @@ def preprocess(path):
     with open(path) as f:
       lines = f.readlines()
 
-    if os.path.exists('vecs.npy'):
-      npvecs = np.load('vecs.npy')
+    if os.path.exists('big_vecs.npy'):
+      npvecs = np.load('big_vecs.npy')
     else:
-      words = ' '.join(lines[:1000]).replace('\n', ' ') # just first 1000
+      words = ' '.join(lines).replace('\n', ' ') # lines[:1000] just first 1000
       words = nltk.word_tokenize(words)
       words = [x for x in words if len(x) > 0]
-      print(words)
-      print(len(words))
       
       f = load_model('wiki.en.bin')
 
@@ -76,10 +77,9 @@ def preprocess(path):
       for w in words:
           vec = f.get_word_vector(w)
           vecs.append(vec) 
-          print((w, vec))
 
       npvecs = np.asarray(vecs)
-      np.save('vecs', npvecs)
+      np.save('big_vecs', npvecs)
 
     print(npvecs.shape)
     return npvecs
