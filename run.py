@@ -33,10 +33,6 @@ def make_timeseries_instances(timeseries, window_size):
     X = np.atleast_3d(np.array([timeseries[start:start + window_size] for start in range(0, timeseries.shape[0] - window_size)]))
     y = timeseries[window_size:]
 
-    print("X")
-    print(X[1])
-    print("Y")
-    print(y[0])
     q = np.atleast_3d([timeseries[-window_size:]])
     return X, y, q
 
@@ -54,16 +50,8 @@ def load_data(timeseries, window_size):
     test_size = int(0.05 * nb_samples)           # In real life you'd want to use 0.2 - 0.5
     X_train, X_test, y_train, y_test = X[:-test_size], X[-test_size:], y[:-test_size], y[-test_size:]
 
-    # Make binary problem
-    #print([x for x in X_test])
-    #y_train = [[1,0] if x >= 0 else [0,1] for x in y_train]
-    print(y_test.shape)
-    #y_test = [[1,0] if x >= 0 else [0,1] for x in y_test]
-
     X_train = np.expand_dims(X_train, axis=3)
     X_test = np.expand_dims(X_test, axis=3)
-    #y_train = y_train.reshape((-1, 1))
-    #y_test = y_test.reshape((-1, 1))
     q = np.atleast_3d([timeseries[-window_size:]])
 
     return X_train, y_train, X_test, y_test, q
@@ -133,7 +121,6 @@ def run(batch_size,
     X_train, y_train, X_test, y_test, q = load_data(timeseries, window_size)
     print(X_train.shape)
     print(y_train.shape)
-
     print('---')
 
     nb_classes = 300 #len(np.unique(y_train))
@@ -150,25 +137,6 @@ def run(batch_size,
 
     X_train = X_train.astype('float32')
     X_test = X_test.astype('float32')
-
-    # Normalisation
-    X = np.vstack((X_train, X_test))
-    # 2 cases depending on the image ordering
-    """
-    if K.image_data_format() == "channels_first":
-        for i in range(n_channels):
-            mean = np.mean(X[:, i, :, :])
-            std = np.std(X[:, i, :, :])
-            X_train[:, i, :, :] = (X_train[:, i, :, :] - mean) / std
-            X_test[:, i, :, :] = (X_test[:, i, :, :] - mean) / std
-
-    elif K.image_data_format() == "channels_last":
-        for i in range(n_channels):
-            mean = np.mean(X[:, :, :, i])
-            std = np.std(X[:, :, :, i])
-            X_train[:, :, :, i] = (X_train[:, :, :, i] - mean) / std
-            X_test[:, :, :, i] = (X_test[:, :, :, i] - mean) / std
-    """
 
     ###################
     # Construct model #
