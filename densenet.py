@@ -1,8 +1,8 @@
 from keras.models import Model
 from keras.layers.core import Dense, Dropout, Activation
 from keras.layers.convolutional import Conv1D
-from keras.layers.pooling import AveragePooling2D
-from keras.layers.pooling import GlobalAveragePooling2D
+from keras.layers.pooling import AveragePooling1D
+from keras.layers.pooling import GlobalAveragePooling1D
 from keras.layers import Input, Concatenate
 from keras.layers.normalization import BatchNormalization
 from keras.regularizers import l2
@@ -37,7 +37,7 @@ def conv_factory(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
 
 
 def transition(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
-    """Apply BatchNorm, Relu 1 Conv1D, optional dropout and Maxpooling2D
+    """Apply BatchNorm, Relu 1 Conv1D, optional dropout and Maxpooling1D
 
     :param x: keras model
     :param nb_filter: int -- number of filters
@@ -60,7 +60,7 @@ def transition(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
                kernel_regularizer=l2(weight_decay))(x)
     if dropout_rate:
         x = Dropout(dropout_rate)(x)
-    x = AveragePooling2D((2, 2), strides=(2, 2))(x)
+    x = AveragePooling1D((2, 2), strides=(2, 2))(x)
 
     return x
 
@@ -181,7 +181,7 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
                            gamma_regularizer=l2(weight_decay),
                            beta_regularizer=l2(weight_decay))(x)
     x = Activation('relu')(x)
-    x = GlobalAveragePooling2D(data_format=K.image_data_format())(x)
+    x = GlobalAveragePooling1D()(x)
     x = Dense(nb_classes,
               activation='softmax',
               kernel_regularizer=l2(weight_decay),

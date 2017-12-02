@@ -2,6 +2,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 import os
+import pickle
 import time
 import json
 import argparse
@@ -31,8 +32,8 @@ def munge_data(timeseries, words, indices, window_size, epoch_size):
         timeseries = timeseries.T       # Convert 1D vectors to 2D column vectors
 
     nb_samples, nb_series = timeseries.shape
-    print('\n\nTimeseries ({} samples by {} series):\n'.format(nb_samples, nb_series), timeseries)
-    print(timeseries.shape)
+    #print('\n\nTimeseries ({} samples by {} series):\n'.format(nb_samples, nb_series), timeseries)
+    #print(timeseries.shape)
 
     timeseries = np.asarray(timeseries)
     assert 0 < window_size < timeseries.shape[0]
@@ -42,32 +43,34 @@ def munge_data(timeseries, words, indices, window_size, epoch_size):
     # y is now the index in the 10,000 output softmax
     y = np.asarray([indices[x] for x in words[window_size:epoch_size+window_size]])
     #y = timeseries[window_size:epoch_size+window_size]
-    print(y)
 
-    print('\n\nInput features:', X, '\n\nOutput labels:', y, '\n\nQuery vector:', 0, sep='\n')
-    test_size = int(0.05 * nb_samples)           # In real life you'd want to use 0.2 - 0.5
+    #print('\n\nInput features:', X, '\n\nOutput labels:', y, sep='\n')
+    test_size = int(0.05 * epoch_size) # nb_samples ---In real life you'd want to use 0.2 - 0.5
     X_train, X_test, y_train, y_test = X[:-test_size], X[-test_size:], y[:-test_size], y[-test_size:]
 
     X_train = X_train #np.expand_dims(X_train, axis=3)
     X_test = X_test #np.expand_dims(X_test, axis=3)
-    q = np.atleast_3d([timeseries[-window_size:]])
 
     return X_train, y_train, X_test, y_test
 
 def load_data(path):
-    indices = defaultdict(int)
-    counts = defaultdict(int)
     with open(path) as f:
       words = tokenize(f.read())
 
+    counts = defaultdict(int)
     for word in words:
       counts[word] += 1 
 
-    i = 0
-    for word in counts.keys():
-      indices[word] = i
-      i += 1
-    print("i is: " + str(i))
+    if os.path.exists('indices.p'):
+      indices = pickle.load( open( "indices.p", "rb" ) )
+    else:
+      indices = defaultdict(int)
+      i = 0
+      for word in counts.keys():
+        indices[word] = i
+        i += 1
+      print("i is: " + str(i))
+      pickle.dump( indices, open( "indices.p", "wb" ) )
 
     words = [x for x in words if len(x) > 0]
     return words, indices
@@ -124,26 +127,19 @@ def run(batch_size,
     # Data processing #
     ###################
 
-    epoch_size = 1000
+    epoch_size = 15000
     window_size = 100 
     nb_classes = 10000 #len(np.unique(y_train))
     words, indices = load_data(path)
     timeseries = preprocess(path, words)
-    print(timeseries.shape)
 
     X_train, y_train, X_test, y_test = munge_data(timeseries, words, indices, window_size, epoch_size)
-    print(X_train.shape)
-    print(y_train.shape)
-    print('---')
 
     img_dim = X_train.shape[1:]
 
     # convert class vectors to binary class matrices
     Y_train = np_utils.to_categorical(y_train, nb_classes)
     Y_test = np_utils.to_categorical(y_test, nb_classes)
-    print(Y_train.shape)
-    print(Y_test.shape)
-    print('---')
 
     X_train = X_train.astype('float32')
     X_test = X_test.astype('float32')
@@ -170,24 +166,23 @@ def run(batch_size,
       opt = Adam(lr=learning_rate, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
       #opt = Nadam(lr=0.002)
 
-      model.compile(loss='mse',
+      model.compile(loss='categorical_crossentropy',
                     optimizer=opt,
                     metrics=['mae', 'accuracy'])
 
-    if plot_architecture:
-        from keras.utils.visualize_util import plot
-        plot(model, to_file='./figures/densenet_archi.png', show_shapes=True)
+    #if plot_architecture:
+    #    from keras.utils.visualize_util import plot
+    #    plot(model, to_file='./figures/densenet_archi.png', show_shapes=True)
 
     ####################
     # Network training #
     ####################
 
-    #train(model, X_train, y_train, X_test, y_test, q, args)
+    train(model, X_train, Y_train, X_test, Y_test, args)
+    test(model, X_train, y_train, X_test, y_test)
 
-    test(model, X_train, y_train, X_test, y_test, q)
 
-
-def train(model, X_train, y_train, X_test, y_test, q, args):
+def train(model, X_train, y_train, X_test, y_test, args):
     """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
     as input features and evaluate its performance.
 
@@ -197,21 +192,20 @@ def train(model, X_train, y_train, X_test, y_test, q, args):
     model.fit(X_train, y_train, epochs=args.nb_epoch, batch_size=args.batch_size, validation_data=(X_test, y_test), callbacks=[lr_reducer, checkpointer], shuffle=True)
     model.save(name+'.h5')
 
-    #test(X_train, y_train, X_test, y_test, q)
-
-def test(model, X_train, y_train, X_test, y_test, q):
+def test(model, X_train, y_train, X_test, y_test):
     pred = model.predict(X_test)
-    #ft = FastText()
-    #wv = ft.load_fasttext_format('wiki.en.bin')
     print('\n\nactual', 'predicted', sep='\t')
     with open('out.csv', 'w') as f:
       i = 0
-      for actual, predicted in zip(y_test, pred.squeeze()):
+      true = 0
+      for actual, predicted in zip(y_test, pred):
         i += 1
-        f.write(str(wv.similar_by_vector(actual)) + ',')
-        f.write(str(wv.similar_by_vector(predicted)) + '\n')
+        f.write(str(actual) + ',')
+        f.write(str(np.argmax(predicted)) + '\n')
+        if actual == np.argmax(predicted):
+          true += 1
         if i % 100 == 0:
-          print("{} / {}".format(i, 1234))
+          print("True: {} / {}".format(true, i))
 
 if __name__ == '__main__':
 
