@@ -22,8 +22,8 @@ from gensim.models.wrappers import FastText
 import densenet
 
 name = 'v1'
-lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
+lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
 
 
 def munge_data(timeseries, words, indices, window_size, epoch_size):
@@ -190,7 +190,7 @@ def train(model, X_train, y_train, X_test, y_test, args):
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
     model.fit(X_train, y_train, epochs=args.nb_epoch, batch_size=args.batch_size, validation_data=(X_test, y_test), callbacks=[lr_reducer, checkpointer], shuffle=True)
-    model.save(name+'.h5')
+    #model.save(name+'.h5')
 
 def test(model, X_train, y_train, X_test, y_test):
     pred = model.predict(X_test)
@@ -236,8 +236,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print("Network configuration:")
-    for name, value in parser.parse_args()._get_kwargs():
-        print(name, value)
+    for key, value in parser.parse_args()._get_kwargs():
+        print(key, value)
 
     run(args.batch_size,
                 args.nb_epoch,
