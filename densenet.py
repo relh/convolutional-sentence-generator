@@ -1,6 +1,6 @@
 from keras.models import Model
 from keras.layers.core import Dense, Dropout, Activation
-from keras.layers.convolutional import Conv2D
+from keras.layers.convolutional import Conv1D
 from keras.layers.pooling import AveragePooling2D
 from keras.layers.pooling import GlobalAveragePooling2D
 from keras.layers import Input, Concatenate
@@ -10,14 +10,14 @@ import keras.backend as K
 
 
 def conv_factory(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
-    """Apply BatchNorm, Relu 3x3Conv2D, optional dropout
+    """Apply BatchNorm, Relu 3 Conv1D, optional dropout
 
     :param x: Input keras network
     :param nb_filter: int -- number of filters
     :param dropout_rate: int -- dropout rate
     :param weight_decay: int -- weight decay factor
 
-    :returns: keras network with b_norm, relu and Conv2D added
+    :returns: keras network with b_norm, relu and Conv1D added
     :rtype: keras network
     """
 
@@ -25,7 +25,7 @@ def conv_factory(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
                            gamma_regularizer=l2(weight_decay),
                            beta_regularizer=l2(weight_decay))(x)
     x = Activation('relu')(x)
-    x = Conv2D(nb_filter, (3, 3),
+    x = Conv1D(nb_filter, 2,
                kernel_initializer="he_uniform",
                padding="same",
                use_bias=False,
@@ -37,7 +37,7 @@ def conv_factory(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
 
 
 def transition(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
-    """Apply BatchNorm, Relu 1x1Conv2D, optional dropout and Maxpooling2D
+    """Apply BatchNorm, Relu 1 Conv1D, optional dropout and Maxpooling2D
 
     :param x: keras model
     :param nb_filter: int -- number of filters
@@ -53,7 +53,7 @@ def transition(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
                            gamma_regularizer=l2(weight_decay),
                            beta_regularizer=l2(weight_decay))(x)
     x = Activation('relu')(x)
-    x = Conv2D(nb_filter, (1, 1),
+    x = Conv1D(nb_filter, 1,
                kernel_initializer="he_uniform",
                padding="same",
                use_bias=False,
@@ -156,10 +156,10 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
     nb_layers = int((depth - 4) / 3)
 
     # Initial convolution
-    x = Conv2D(nb_filter, (3, 3),
+    x = Conv1D(nb_filter, 2,
                kernel_initializer="he_uniform",
                padding="same",
-               name="initial_conv2D",
+               name="initial_conv1D",
                use_bias=False,
                kernel_regularizer=l2(weight_decay))(model_input)
 
@@ -183,7 +183,7 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
     x = Activation('relu')(x)
     x = GlobalAveragePooling2D(data_format=K.image_data_format())(x)
     x = Dense(nb_classes,
-              activation='sigmoid',
+              activation='softmax',
               kernel_regularizer=l2(weight_decay),
               bias_regularizer=l2(weight_decay))(x)
 
