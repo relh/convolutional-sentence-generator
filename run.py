@@ -5,6 +5,7 @@ import os
 import pickle
 import time
 import json
+import random
 import argparse
 import numpy as np
 import keras.backend as K
@@ -26,7 +27,7 @@ checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=Tr
 lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
 
 
-def munge_data(timeseries, words, indices, window_size, epoch_size):
+def munge_data(timeseries, words, indices, window_size):
     timeseries = np.atleast_2d(timeseries)
     if timeseries.shape[0] == 1:
         timeseries = timeseries.T       # Convert 1D vectors to 2D column vectors
@@ -37,15 +38,14 @@ def munge_data(timeseries, words, indices, window_size, epoch_size):
 
     timeseries = np.asarray(timeseries)
     assert 0 < window_size < timeseries.shape[0]
-    assert 0 < epoch_size < timeseries.shape[0]-window_size
-    X = np.atleast_2d(np.array([timeseries[start:start + window_size] for start in range(0, epoch_size)])) #timeseries.shape[0] - window_size)]))
+    X = np.atleast_2d(np.array([(start, start + window_size) for start in range(0, timeseries.shape[0] - window_size)]))
 
     # y is now the index in the 10,000 output softmax
-    y = np.asarray([indices[x] for x in words[window_size:epoch_size+window_size]])
-    #y = timeseries[window_size:epoch_size+window_size]
+    y = np.asarray([indices[x] for x in words[window_size:]])
+    #y = timeseries[window_size:]
 
     #print('\n\nInput features:', X, '\n\nOutput labels:', y, sep='\n')
-    test_size = int(0.05 * epoch_size) # nb_samples ---In real life you'd want to use 0.2 - 0.5
+    test_size = int(0.05 * nb_samples) # In real life you'd want to use 0.2 - 0.5
     X_train, X_test, y_train, y_test = X[:-test_size], X[-test_size:], y[:-test_size], y[-test_size:]
 
     X_train = X_train #np.expand_dims(X_train, axis=3)
@@ -79,7 +79,6 @@ def preprocess(path, words):
     vec_path = path.split('.')[0]
     if os.path.exists(vec_path+'.npy'):
       np_vecs = np.load(vec_path+'.npy')
-      print(np_vecs)
     else:
       words_len = len(words)
       
@@ -127,22 +126,13 @@ def run(batch_size,
     # Data processing #
     ###################
 
-    epoch_size = 15000
-    window_size = 100 
+    window_size = 100
     nb_classes = 10000 #len(np.unique(y_train))
+    img_dim = (window_size, 300) #X_train.shape[1:]
+
     words, indices = load_data(path)
     timeseries = preprocess(path, words)
-
-    X_train, y_train, X_test, y_test = munge_data(timeseries, words, indices, window_size, epoch_size)
-
-    img_dim = X_train.shape[1:]
-
-    # convert class vectors to binary class matrices
-    Y_train = np_utils.to_categorical(y_train, nb_classes)
-    Y_test = np_utils.to_categorical(y_test, nb_classes)
-
-    X_train = X_train.astype('float32')
-    X_test = X_test.astype('float32')
+    #X_train, y_train, X_test, y_test = munge_data(timeseries, words, indices, window_size)
 
     ###################
     # Construct model #
@@ -178,18 +168,39 @@ def run(batch_size,
     # Network training #
     ####################
 
-    train(model, X_train, Y_train, X_test, Y_test, args)
-    test(model, X_train, y_train, X_test, y_test)
+    train(model, timeseries, indices, words, window_size, args)
+    #test(model, X_train, y_train, X_test, y_test)
 
 
-def train(model, X_train, y_train, X_test, y_test, args):
+def train(model, timeseries, indices, words, window_size, args):
+    # convert class vectors to binary class matrices
+    #Y_train = np_utils.to_categorical(y_train, nb_classes)
+    #Y_test = np_utils.to_categorical(y_test, nb_classes)
+    def generator(timeseries, batch_size, top, bot=1):
+     # Create empty arrays to contain batch of features and labels#
+     batch_features = np.zeros((batch_size, 100, 300))
+
+     while True:
+       batch_labels = np.zeros((batch_size,10000))
+       for i in range(batch_size):
+          # choose random index in features
+          index = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
+          X = np.atleast_2d(np.array([timeseries[start:start + window_size] for start in range(index, index+1)]))
+          batch_features[i] = X
+
+          # y is now the index in the 10,000 output softmax
+          batch_labels[i][indices[words[index+window_size]]] = 1.0
+
+       yield batch_features, batch_labels
+
     """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
     as input features and evaluate its performance.
 
     :param ndarray timeseries: Timeseries data with time increasing down the rows (the leading dimension/axis).
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
-    model.fit(X_train, y_train, epochs=args.nb_epoch, batch_size=args.batch_size, validation_data=(X_test, y_test), callbacks=[lr_reducer, checkpointer], shuffle=True)
+    top = len(timeseries)-window_size-int(len(timeseries)*0.05)
+    model.fit_generator(generator(timeseries, args.batch_size, top), steps_per_epoch=10000, epochs=args.nb_epoch, validation_data=generator(timeseries, args.batch_size, len(timeseries)-window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=True)
     #model.save(name+'.h5')
 
 def test(model, X_train, y_train, X_test, y_test):
