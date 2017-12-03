@@ -27,32 +27,6 @@ checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=Tr
 lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=10, min_lr=0.000001, verbose=1)
 
 
-def munge_data(timeseries, words, indices, window_size):
-    timeseries = np.atleast_2d(timeseries)
-    if timeseries.shape[0] == 1:
-        timeseries = timeseries.T       # Convert 1D vectors to 2D column vectors
-
-    nb_samples, nb_series = timeseries.shape
-    #print('\n\nTimeseries ({} samples by {} series):\n'.format(nb_samples, nb_series), timeseries)
-    #print(timeseries.shape)
-
-    timeseries = np.asarray(timeseries)
-    assert 0 < window_size < timeseries.shape[0]
-    X = np.atleast_2d(np.array([(start, start + window_size) for start in range(0, timeseries.shape[0] - window_size)]))
-
-    # y is now the index in the 10,000 output softmax
-    y = np.asarray([indices[x] for x in words[window_size:]])
-    #y = timeseries[window_size:]
-
-    #print('\n\nInput features:', X, '\n\nOutput labels:', y, sep='\n')
-    test_size = int(0.05 * nb_samples) # In real life you'd want to use 0.2 - 0.5
-    X_train, X_test, y_train, y_test = X[:-test_size], X[-test_size:], y[:-test_size], y[-test_size:]
-
-    X_train = X_train #np.expand_dims(X_train, axis=3)
-    X_test = X_test #np.expand_dims(X_test, axis=3)
-
-    return X_train, y_train, X_test, y_test
-
 def load_data(path):
     with open(path) as f:
       words = tokenize(f.read())
@@ -126,13 +100,8 @@ def run(batch_size,
     # Data processing #
     ###################
 
-    window_size = 100
-    nb_classes = 10000 #len(np.unique(y_train))
-    img_dim = (window_size, 300) #X_train.shape[1:]
-
     words, indices = load_data(path)
     timeseries = preprocess(path, words)
-    #X_train, y_train, X_test, y_test = munge_data(timeseries, words, indices, window_size)
 
     ###################
     # Construct model #
@@ -141,8 +110,8 @@ def run(batch_size,
     if os.path.exists(name+'.h5'):
       model = keras_load_model(name+'.h5')
     else:
-      model = densenet.DenseNet(nb_classes,
-                                img_dim,
+      model = densenet.DenseNet(args.nb_classes,
+                                args.img_dim,
                                 depth,
                                 nb_dense_block,
                                 growth_rate,
@@ -160,38 +129,35 @@ def run(batch_size,
                     optimizer=opt,
                     metrics=['mae', 'accuracy'])
 
-    #if plot_architecture:
-    #    from keras.utils.visualize_util import plot
-    #    plot(model, to_file='./figures/densenet_archi.png', show_shapes=True)
-
     ####################
     # Network training #
     ####################
 
-    train(model, timeseries, indices, words, window_size, args)
+    train(model, timeseries, indices, words, args)
     #test(model, X_train, y_train, X_test, y_test)
 
 
-def train(model, timeseries, indices, words, window_size, args):
+def generator(timeseries, indices, words, args, top, bot=1):
+    # Create empty arrays to contain batch of features and labels#
+    batch_features = np.zeros((args.batch_size, 100, 300))
+
+    while True:
+        batch_labels = np.zeros((args.batch_size,10000))
+        for i in range(args.batch_size):
+            # choose random index in features
+            start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
+            batch_features[i] = np.array(timeseries[start:start + args.window_size])
+
+            # y is now the index in the 10,000 output softmax
+            batch_labels[i][indices[words[start+args.window_size]]] = 1.0
+
+        yield batch_features, batch_labels
+
+
+def train(model, timeseries, indices, words, args):
     # convert class vectors to binary class matrices
     #Y_train = np_utils.to_categorical(y_train, nb_classes)
     #Y_test = np_utils.to_categorical(y_test, nb_classes)
-    def generator(timeseries, batch_size, top, bot=1):
-     # Create empty arrays to contain batch of features and labels#
-     batch_features = np.zeros((batch_size, 100, 300))
-
-     while True:
-       batch_labels = np.zeros((batch_size,10000))
-       for i in range(batch_size):
-          # choose random index in features
-          index = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
-          X = np.atleast_2d(np.array([timeseries[start:start + window_size] for start in range(index, index+1)]))
-          batch_features[i] = X
-
-          # y is now the index in the 10,000 output softmax
-          batch_labels[i][indices[words[index+window_size]]] = 1.0
-
-       yield batch_features, batch_labels
 
     """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
     as input features and evaluate its performance.
@@ -199,9 +165,9 @@ def train(model, timeseries, indices, words, window_size, args):
     :param ndarray timeseries: Timeseries data with time increasing down the rows (the leading dimension/axis).
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
-    top = len(timeseries)-window_size-int(len(timeseries)*0.05)
-    model.fit_generator(generator(timeseries, args.batch_size, top), steps_per_epoch=10000, epochs=args.nb_epoch, validation_data=generator(timeseries, args.batch_size, len(timeseries)-window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=True)
-    #model.save(name+'.h5')
+    top = len(timeseries)-args.window_size-int(len(timeseries)*0.05)
+    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=False, use_multiprocessing=True, verbose=1, workers=6)
+    model.save('END_'+name+'.h5')
 
 def test(model, X_train, y_train, X_test, y_test):
     pred = model.predict(X_test)
@@ -221,11 +187,11 @@ def test(model, X_train, y_train, X_test, y_test):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=16, type=int,
+    parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=1, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=7,
+    parser.add_argument('--depth', type=int, default=70,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
@@ -243,6 +209,14 @@ if __name__ == '__main__':
                         help='Save a plot of the network architecture')
     parser.add_argument('--path', type=str, default='data/train.txt',
                         help='Specify file path to train on')
+    parser.add_argument('--window_size', type=int, default=100,
+                        help='How many words to use as context')
+    parser.add_argument('--nb_classes', type=int, default=10000,
+                        help='Number of classes')
+    parser.add_argument('--img_dim', type=tuple, default=(100, 300),
+                        help='Image dimension, i.e. width by channels for text')
+    parser.add_argument('--epoch_steps', type=int, default=3000,
+                        help='Steps in an epoch')
 
     args = parser.parse_args()
 
