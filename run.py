@@ -142,7 +142,7 @@ def generator(timeseries, indices, words, args, top, bot=1):
     batch_features = np.zeros((args.batch_size, 100, 300))
 
     while True:
-        batch_labels = np.zeros((args.batch_size,10000))
+        batch_labels = np.zeros((args.batch_size,args.nb_classes))
         for i in range(args.batch_size):
             # choose random index in features
             start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
@@ -166,7 +166,7 @@ def train(model, timeseries, indices, words, args):
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
     top = len(timeseries)-args.window_size-int(len(timeseries)*0.05)
-    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=False, use_multiprocessing=True, verbose=1, workers=6)
+    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=False, use_multiprocessing=True, verbose=1, workers=4)
     model.save('END_'+name+'.h5')
 
 def test(model, X_train, y_train, X_test, y_test):
@@ -215,7 +215,7 @@ if __name__ == '__main__':
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=3000,
+    parser.add_argument('--epoch_steps', type=int, default=1000,
                         help='Steps in an epoch')
 
     args = parser.parse_args()
