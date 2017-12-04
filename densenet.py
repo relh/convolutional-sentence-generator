@@ -60,7 +60,7 @@ def transition(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
                kernel_regularizer=l2(weight_decay))(x)
     if dropout_rate:
         x = Dropout(dropout_rate)(x)
-    x = AveragePooling1D((2, 2), strides=(2, 2))(x)
+    x = AveragePooling1D((2), strides=(2))(x)
 
     return x
 
