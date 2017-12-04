@@ -22,7 +22,7 @@ import densenet
 
 name = 'v12'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=2, min_lr=0.000001, verbose=1)
+lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=5, min_lr=0.000001, verbose=1)
 
 
 def load_data(path):
@@ -104,11 +104,8 @@ def run(args):
 
     words, _ = load_data(args.test_path)
     timeseries = preprocess(args.test_path, words)
-
-    #unmatched_item = set(indices.items()) ^ set(indices2.items())
-    #print(len(unmatched_item)) # should be 0
-
-    test(model, timeseries, indices, words, args)
+    cel_perplexity(model, timeseries, indices, words, args)
+    nll_perplexity(model, timeseries, indices, words, args)
 
 
 def generator(timeseries, indices, words, args, top=-1, bot=1):
@@ -139,7 +136,7 @@ def train(model, timeseries, indices, words, args):
     model.save('END_'+name+'.h5')
 
 
-def test(model, timeseries, indices, words, args):
+def cel_perplexity(model, timeseries, indices, words, args):
     accum = 0
     words_len = len(words)-args.window_size
     batches = words_len / args.batch_size
@@ -156,7 +153,31 @@ def test(model, timeseries, indices, words, args):
     print(accum)
     avg = accum / (batches) 
     print(avg)
-    print(np.exp(avg))
+    perplex = np.exp(avg)
+    print(perplex)
+
+def nll_perplexity(model, timeseries, indices, words, args):
+    accum = 0
+    words_len = len(words)-args.window_size
+    batches = words_len / args.batch_size
+    print(batches)
+    for start in range(0, batches):
+      idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+      label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])
+      
+      pred = model.predict(inp)
+      lp = np.log(pred)
+      for i, ent in enumerate(lp):
+        accum += ent[label[i]]
+      if start % 5 == 0:
+        print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
+    accum = -accum
+    print(accum)
+    avg = accum / words_len 
+    print(avg)
+    perplex = np.exp(avg)
+    print(perplex)
 
 
 if __name__ == '__main__':
@@ -192,9 +213,9 @@ if __name__ == '__main__':
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=2000,
+    parser.add_argument('--epoch_steps', type=int, default=500,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=500,
+    parser.add_argument('--val_steps', type=int, default=100,
                         help='Steps in an epoch')
     """ Run Conv NLP experiments
 
