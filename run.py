@@ -20,7 +20,7 @@ from fastText import tokenize
 
 import densenet
 
-name = 'v10'
+name = 'v12'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
 lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=2, min_lr=0.000001, verbose=1)
 
@@ -68,39 +68,7 @@ def preprocess(path, words):
     return np_vecs
 
 
-def run(batch_size,
-                nb_epoch,
-                depth,
-                nb_dense_block,
-                nb_filter,
-                growth_rate,
-                dropout_rate,
-                learning_rate,
-                weight_decay,
-                plot_architecture,
-                path):
-    """ Run Conv NLP experiments
-
-    :param batch_size: int -- batch size
-    :param nb_epoch: int -- number of training epochs
-    :param depth: int -- network depth
-    :param nb_dense_block: int -- number of dense blocks
-    :param nb_filter: int -- initial number of conv filter
-    :param growth_rate: int -- number of new filters added by conv layers
-    :param dropout_rate: float -- dropout rate
-    :param learning_rate: float -- learning rate
-    :param weight_decay: float -- weight decay
-    :param plot_architecture: bool -- whether to plot network architecture
-
-    """
-
-    ###################
-    # Data processing #
-    ###################
-
-    words, indices = load_data(path)
-    timeseries = preprocess(path, words)
-
+def run(args):
     ###################
     # Construct model #
     ###################
@@ -110,12 +78,12 @@ def run(batch_size,
     else:
       model = densenet.DenseNet(args.nb_classes,
                                 args.img_dim,
-                                depth,
-                                nb_dense_block,
-                                growth_rate,
-                                nb_filter,
-                                dropout_rate=dropout_rate,
-                                weight_decay=weight_decay)
+                                args.depth,
+                                args.nb_dense_block,
+                                args.growth_rate,
+                                args.nb_filter,
+                                dropout_rate=args.dropout_rate,
+                                weight_decay=args.weight_decay)
       # Model output
       model.summary()
 
@@ -130,7 +98,16 @@ def run(batch_size,
     # Network training #
     ####################
 
+    words, indices = load_data(args.train_path)
+    timeseries = preprocess(args.train_path, words)
     #train(model, timeseries, indices, words, args)
+
+    words, _ = load_data(args.test_path)
+    timeseries = preprocess(args.test_path, words)
+
+    #unmatched_item = set(indices.items()) ^ set(indices2.items())
+    #print(len(unmatched_item)) # should be 0
+
     test(model, timeseries, indices, words, args)
 
 
@@ -163,15 +140,29 @@ def train(model, timeseries, indices, words, args):
 
 
 def test(model, timeseries, indices, words, args):
-    #answer = model.evaluate_generator(generator(timeseries, indices, words, args), steps=100)#, top, 1))
-    print(answer)
-    print(timeseries.shape)
+    accum = 0
+    words_len = len(words)-args.window_size
+    batches = words_len / args.batch_size
+    print(batches)
+    for start in range(0, batches):
+      idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+      label = np_utils.to_categorical(np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]]), args.nb_classes)
+      
+      pred, _, _ = model.evaluate(inp, label)
+      accum += pred 
+      if start % 5 == 0:
+        print("{} / {}. Loss: {}".format(start, batches, pred))
+    print(accum)
+    avg = accum / (batches) 
+    print(avg)
+    print(np.exp(avg))
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=384, type=int,
+    parser.add_argument('--batch_size', default=1024, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
@@ -191,8 +182,10 @@ if __name__ == '__main__':
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
-    parser.add_argument('--path', type=str, default='data/train.txt',
+    parser.add_argument('--test_path', type=str, default='data/train.txt',
                         help='Specify file path to train on')
+    parser.add_argument('--train_path', type=str, default='data/test.txt',
+                        help='Specify file path to test on')
     parser.add_argument('--window_size', type=int, default=100,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
@@ -203,21 +196,24 @@ if __name__ == '__main__':
                         help='Steps in an epoch')
     parser.add_argument('--val_steps', type=int, default=500,
                         help='Steps in an epoch')
+    """ Run Conv NLP experiments
 
+    :param batch_size: int -- batch size
+    :param nb_epoch: int -- number of training epochs
+    :param depth: int -- network depth
+    :param nb_dense_block: int -- number of dense blocks
+    :param nb_filter: int -- initial number of conv filter
+    :param growth_rate: int -- number of new filters added by conv layers
+    :param dropout_rate: float -- dropout rate
+    :param learning_rate: float -- learning rate
+    :param weight_decay: float -- weight decay
+    :param plot_architecture: bool -- whether to plot network architecture
+
+    """
     args = parser.parse_args()
 
     print("Network configuration:")
     for key, value in parser.parse_args()._get_kwargs():
         print(key, value)
 
-    run(args.batch_size,
-                args.nb_epoch,
-                args.depth,
-                args.nb_dense_block,
-                args.nb_filter,
-                args.growth_rate,
-                args.dropout_rate,
-                args.learning_rate,
-                args.weight_decay,
-                args.plot_architecture,
-                args.path)
+    run(args)
