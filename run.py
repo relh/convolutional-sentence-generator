@@ -20,7 +20,7 @@ from fastText import tokenize
 
 import densenet
 
-name = 'v6'
+name = 'v7'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
 lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
 
@@ -135,36 +135,27 @@ def run(batch_size,
 
 
 def generator(timeseries, indices, words, args, top, bot=1):
-    # Create empty arrays to contain batch of features and labels#
-    batch_features = np.zeros((args.batch_size, 100, 300))
-
     while True:
-        batch_labels = np.zeros((args.batch_size,args.nb_classes))
-        for i in range(args.batch_size):
-            # choose random index in features
-            start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
-            batch_features[i] = np.array(timeseries[start:start + args.window_size])
-
-            # y is now the index in the 10,000 output softmax
-            batch_labels[i][indices[words[start+args.window_size]]] = 1.0
+        # choose random index in features
+        start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
+        batch_features = np.array([timeseries[i:i+args.window_size] for i in range(start, start+args.batch_size)])
+        batch_labels = np_utils.to_categorical(np.asarray([indices[x] for x in words[start+args.window_size:start+args.window_size+args.batch_size]]), args.nb_classes)
 
         yield batch_features, batch_labels
 
 
 def train(model, timeseries, indices, words, args):
-    # convert class vectors to binary class matrices
-    #Y_train = np_utils.to_categorical(y_train, nb_classes)
-    #Y_test = np_utils.to_categorical(y_test, nb_classes)
-
     """Create a 1D CNN regressor to predict the next value in a `timeseries` using the preceding `window_size` elements
     as input features and evaluate its performance.
 
     :param ndarray timeseries: Timeseries data with time increasing down the rows (the leading dimension/axis).
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
-    top = len(timeseries)-args.window_size-int(len(timeseries)*0.05)
+    top = len(timeseries)-args.window_size-args.batch_size-int(len(timeseries)*0.05)
     print(args.nb_epoch)
-    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size, top), validation_steps=500, callbacks=[lr_reducer, checkpointer], shuffle=False, use_multiprocessing=True, workers=7, max_queue_size=250)
+    print(top)
+    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size-args.batch_size, top), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=False)
+    #, use_multiprocessing=True, workers=7, max_queue_size=250)
     model.save('END_'+name+'.h5')
 
 def test(model, X_train, y_train, X_test, y_test):
@@ -185,7 +176,7 @@ def test(model, X_train, y_train, X_test, y_test):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=32, type=int,
+    parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=100, type=int,
                         help='Number of epochs')
@@ -197,9 +188,9 @@ if __name__ == '__main__':
                         help='Initial number of conv filters')
     parser.add_argument('--growth_rate', type=int, default=16,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.5,
+    parser.add_argument('--dropout_rate', type=float, default=0.4,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=1E-2,
+    parser.add_argument('--learning_rate', type=float, default=1E-3,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=1E-3,
                         help='L2 regularization on weights')
