@@ -20,9 +20,9 @@ from fastText import tokenize
 
 import densenet
 
-name = 'v7'
+name = 'v10'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
+lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=2, min_lr=0.000001, verbose=1)
 
 
 def load_data(path):
@@ -130,11 +130,14 @@ def run(batch_size,
     # Network training #
     ####################
 
-    train(model, timeseries, indices, words, args)
-    #test(model, X_train, y_train, X_test, y_test)
+    #train(model, timeseries, indices, words, args)
+    test(model, timeseries, indices, words, args)
 
 
-def generator(timeseries, indices, words, args, top, bot=1):
+def generator(timeseries, indices, words, args, top=-1, bot=1):
+    print(top)
+    if top < 0:
+      top = len(timeseries)
     while True:
         # choose random index in features
         start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
@@ -158,41 +161,33 @@ def train(model, timeseries, indices, words, args):
     #, use_multiprocessing=True, workers=7, max_queue_size=250)
     model.save('END_'+name+'.h5')
 
-def test(model, X_train, y_train, X_test, y_test):
-    pred = model.predict(X_test)
-    print('\n\nactual', 'predicted', sep='\t')
-    with open('out.csv', 'w') as f:
-      i = 0
-      true = 0
-      for actual, predicted in zip(y_test, pred):
-        i += 1
-        f.write(str(actual) + ',')
-        f.write(str(np.argmax(predicted)) + '\n')
-        if actual == np.argmax(predicted):
-          true += 1
-        if i % 100 == 0:
-          print("True: {} / {}".format(true, i))
+
+def test(model, timeseries, indices, words, args):
+    #answer = model.evaluate_generator(generator(timeseries, indices, words, args), steps=100)#, top, 1))
+    print(answer)
+    print(timeseries.shape)
+
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=384, type=int,
                         help='Batch size')
-    parser.add_argument('--nb_epoch', default=100, type=int,
+    parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=16,
+    parser.add_argument('--depth', type=int, default=22,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
-    parser.add_argument('--nb_filter', type=int, default=32,
+    parser.add_argument('--nb_filter', type=int, default=64,
                         help='Initial number of conv filters')
     parser.add_argument('--growth_rate', type=int, default=16,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.4,
+    parser.add_argument('--dropout_rate', type=float, default=0.3,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=1E-3,
+    parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=1E-3,
+    parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
@@ -204,9 +199,9 @@ if __name__ == '__main__':
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=1000,
+    parser.add_argument('--epoch_steps', type=int, default=2000,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=150,
+    parser.add_argument('--val_steps', type=int, default=500,
                         help='Steps in an epoch')
 
     args = parser.parse_args()
