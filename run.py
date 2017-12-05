@@ -20,9 +20,9 @@ from fastText import tokenize
 
 import densenet
 
-name = 'models/v18'
+name = 'models/v19'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
+lr_reducer = ReduceLROnPlateau(monitor='perplexity', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
 
 
 def load_data(path):
@@ -67,6 +67,11 @@ def preprocess(path, words):
       np.save(vec_path, np_vecs)
     return np_vecs
 
+def perplexity(y_true, y_pred):
+    cross_entropy = K.categorical_crossentropy(y_true, y_pred)
+    perplexity = K.pow(2.0, cross_entropy)
+    return perplexity
+
 
 def run(args):
     ###################
@@ -92,7 +97,7 @@ def run(args):
 
       model.compile(loss='categorical_crossentropy',
                     optimizer=opt,
-                    metrics=['mae', 'accuracy'])
+                    metrics=[perplexity, 'mae', 'accuracy'])
 
     ####################
     # Network training #
@@ -187,19 +192,19 @@ if __name__ == '__main__':
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=37,
+    parser.add_argument('--depth', type=int, default=22,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
-    parser.add_argument('--nb_filter', type=int, default=64,
+    parser.add_argument('--nb_filter', type=int, default=32,
                         help='Initial number of conv filters')
-    parser.add_argument('--growth_rate', type=int, default=32,
+    parser.add_argument('--growth_rate', type=int, default=16,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.6,
+    parser.add_argument('--dropout_rate', type=float, default=0.3,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.01,
+    parser.add_argument('--learning_rate', type=float, default=0.1,
                         help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.01,
+    parser.add_argument('--weight_decay', type=float, default=0.001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
@@ -207,7 +212,7 @@ if __name__ == '__main__':
                         help='Specify file path to train on')
     parser.add_argument('--train_path', type=str, default='data/test.txt',
                         help='Specify file path to test on')
-    parser.add_argument('--window_size', type=int, default=100,
+    parser.add_argument('--window_size', type=int, default=50,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
                         help='Number of classes')
