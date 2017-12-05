@@ -8,6 +8,11 @@ from keras.layers.normalization import BatchNormalization
 from keras.regularizers import l2
 import keras.backend as K
 
+if K.image_dim_ordering() == "th":
+    concat_axis = 1
+elif K.image_dim_ordering() == "tf":
+    concat_axis = -1
+
 
 def conv_factory(x, nb_filter, dropout_rate=None, weight_decay=1E-4):
     """Apply BatchNorm, Relu 3 Conv1D, optional dropout
@@ -84,11 +89,6 @@ def denseblock(x, nb_layers, nb_filter, growth_rate,
 
     list_feat = [x]
 
-    if K.image_dim_ordering() == "th":
-        concat_axis = 1
-    elif K.image_dim_ordering() == "tf":
-        concat_axis = -1
-
     for i in range(nb_layers):
         x = conv_factory(x, growth_rate, dropout_rate, weight_decay)
         list_feat.append(x)
@@ -116,11 +116,6 @@ def denseblock_altern(x, nb_layers, nb_filter, growth_rate,
     * The main difference between this implementation and the implementation
     above is that the one above
     """
-
-    if K.image_dim_ordering() == "th":
-        concat_axis = 1
-    elif K.image_dim_ordering() == "tf":
-        concat_axis = -1
 
     for i in range(nb_layers):
         merge_tensor = conv_factory(x, growth_rate, dropout_rate, weight_decay)
@@ -162,6 +157,10 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
                name="initial_conv1D",
                use_bias=False,
                kernel_regularizer=l2(weight_decay))(model_input)
+
+    list_feat = [model_input]
+    list_feat.append(x)
+    x = Concatenate(axis=concat_axis)(list_feat)
 
     # Add dense blocks
     for block_idx in range(nb_dense_block - 1):
