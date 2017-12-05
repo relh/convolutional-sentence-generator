@@ -20,9 +20,9 @@ from fastText import tokenize
 
 import densenet
 
-name = 'models/v16'
+name = 'models/v18'
 checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='val_acc', factor=0.9, patience=5, min_lr=0.000001, verbose=1)
+lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
 
 
 def load_data(path):
@@ -183,7 +183,7 @@ def nll_perplexity(model, timeseries, indices, words, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=512, type=int,
+    parser.add_argument('--batch_size', default=256, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
@@ -195,11 +195,11 @@ if __name__ == '__main__':
                         help='Initial number of conv filters')
     parser.add_argument('--growth_rate', type=int, default=32,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.4,
+    parser.add_argument('--dropout_rate', type=float, default=0.6,
                         help='Dropout rate')
     parser.add_argument('--learning_rate', type=float, default=0.01,
                         help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.0001,
+    parser.add_argument('--weight_decay', type=float, default=0.01,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
@@ -213,9 +213,9 @@ if __name__ == '__main__':
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=500,
+    parser.add_argument('--epoch_steps', type=int, default=1000,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=100,
+    parser.add_argument('--val_steps', type=int, default=250,
                         help='Steps in an epoch')
     """ Run Conv NLP experiments
 
