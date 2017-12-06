@@ -20,9 +20,62 @@ from fastText import tokenize
 
 import densenet
 
-name = 'models/v19'
-checkpointer = ModelCheckpoint(filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='perplexity', factor=0.9, patience=3, min_lr=0.000001, verbose=1)
+version = 'v23'
+name = 'models/' + version
+# val_perplexity
+checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
+lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=0.000001, verbose=1)
+
+
+def perplexity(y_true, y_pred):
+    cross_entropy = K.categorical_crossentropy(y_true, y_pred)
+    perplexity = K.pow(2.0, cross_entropy)
+    return perplexity
+
+
+def cel_perplexity(model, timeseries, indices, words, args):
+    accum = 0
+    words_len = len(words)-args.window_size
+    batches = words_len / args.batch_size
+    print(batches)
+    for start in range(0, batches):
+      idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+      label = np_utils.to_categorical(np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]]), args.nb_classes)
+      
+      pred, _, _ = model.evaluate(inp, label)
+      accum += pred 
+      if start % 5 == 0:
+        print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
+    print(accum)
+    avg = accum / (batches) 
+    print(avg)
+    perplex = np.exp(2.0, avg)
+    print(perplex)
+
+
+def nll_perplexity(model, timeseries, indices, words, args):
+    accum = 0
+    words_len = len(words)-args.window_size
+    batches = words_len / args.batch_size
+    print(batches)
+    for start in range(0, batches):
+      idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+      label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])
+      
+      pred = model.predict(inp)
+      lp = np.log(pred)
+      for i, ent in enumerate(lp):
+        accum += ent[label[i]]
+      if start % 5 == 0:
+        print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
+    accum = -accum
+    print(accum)
+    avg = accum / words_len 
+    print(avg)
+    perplex = np.exp(avg)
+    print(perplex)
 
 
 def load_data(path):
@@ -47,6 +100,7 @@ def load_data(path):
     words = [x for x in words if len(x) > 0]
     return words, indices
 
+
 def preprocess(path, words):
     vec_path = path.split('.')[0]
     if os.path.exists(vec_path+'.npy'):
@@ -67,11 +121,6 @@ def preprocess(path, words):
       np.save(vec_path, np_vecs)
     return np_vecs
 
-def perplexity(y_true, y_pred):
-    cross_entropy = K.categorical_crossentropy(y_true, y_pred)
-    perplexity = K.pow(2.0, cross_entropy)
-    return perplexity
-
 
 def run(args):
     ###################
@@ -79,7 +128,8 @@ def run(args):
     ###################
 
     if os.path.exists(name+'.h5'):
-      model = keras_load_model(name+'.h5')
+      model = keras_load_model(name+'.h5', custom_objects={'perplexity': perplexity})
+      model.summary()
     else:
       model = densenet.DenseNet(args.nb_classes,
                                 args.img_dim,
@@ -134,77 +184,31 @@ def train(model, timeseries, indices, words, args):
     :param int window_size: The number of previous timeseries values to use to predict the next.
     """
     top = len(timeseries)-args.window_size-args.batch_size-int(len(timeseries)*0.05)
-    print(args.nb_epoch)
-    print(top)
+    print("--- Model Version: {} ---".format(name))
+    print("Number of words in training set: {}".format(top))
     model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size-args.batch_size, top), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=False)
-    #, use_multiprocessing=True, workers=7, max_queue_size=250)
-    #model.save('END_'+name+'.h5')
-
-
-def cel_perplexity(model, timeseries, indices, words, args):
-    accum = 0
-    words_len = len(words)-args.window_size
-    batches = words_len / args.batch_size
-    print(batches)
-    for start in range(0, batches):
-      idx = start*args.batch_size
-      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np_utils.to_categorical(np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]]), args.nb_classes)
-      
-      pred, _, _ = model.evaluate(inp, label)
-      accum += pred 
-      if start % 5 == 0:
-        print("{} / {}. Loss: {}".format(start, batches, pred))
-    print(accum)
-    avg = accum / (batches) 
-    print(avg)
-    perplex = np.exp(avg)
-    print(perplex)
-
-def nll_perplexity(model, timeseries, indices, words, args):
-    accum = 0
-    words_len = len(words)-args.window_size
-    batches = words_len / args.batch_size
-    print(batches)
-    for start in range(0, batches):
-      idx = start*args.batch_size
-      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])
-      
-      pred = model.predict(inp)
-      lp = np.log(pred)
-      for i, ent in enumerate(lp):
-        accum += ent[label[i]]
-      if start % 5 == 0:
-        print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
-    accum = -accum
-    print(accum)
-    avg = accum / words_len 
-    print(avg)
-    perplex = np.exp(avg)
-    print(perplex)
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=256, type=int,
+    parser.add_argument('--batch_size', default=512, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=22,
+    parser.add_argument('--depth', type=int, default=13,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
-    parser.add_argument('--nb_filter', type=int, default=32,
+    parser.add_argument('--nb_filter', type=int, default=512,
                         help='Initial number of conv filters')
-    parser.add_argument('--growth_rate', type=int, default=16,
+    parser.add_argument('--growth_rate', type=int, default=64,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.3,
+    parser.add_argument('--dropout_rate', type=float, default=0.4,
                         help='Dropout rate')
     parser.add_argument('--learning_rate', type=float, default=0.1,
                         help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.001,
+    parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
@@ -212,15 +216,15 @@ if __name__ == '__main__':
                         help='Specify file path to train on')
     parser.add_argument('--train_path', type=str, default='data/test.txt',
                         help='Specify file path to test on')
-    parser.add_argument('--window_size', type=int, default=50,
+    parser.add_argument('--window_size', type=int, default=100,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=1000,
+    parser.add_argument('--epoch_steps', type=int, default=500,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=250,
+    parser.add_argument('--val_steps', type=int, default=200,
                         help='Steps in an epoch')
     """ Run Conv NLP experiments
 

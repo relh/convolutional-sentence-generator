@@ -158,9 +158,9 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
                use_bias=False,
                kernel_regularizer=l2(weight_decay))(model_input)
 
-    list_feat = [model_input]
-    list_feat.append(x)
-    x = Concatenate(axis=concat_axis)(list_feat)
+    #list_feat = [model_input]
+    #list_feat.append(x)
+    #x = Concatenate(axis=concat_axis)(list_feat)
 
     # Add dense blocks
     for block_idx in range(nb_dense_block - 1):
