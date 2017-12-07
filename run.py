@@ -20,11 +20,11 @@ from fastText import tokenize
 
 import densenet
 
-version = 'v23'
+version = 'v35'
 name = 'models/' + version
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
-lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=0.000001, verbose=1)
+lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=0.00001, verbose=1)
 
 
 def perplexity(y_true, y_pred):
@@ -155,12 +155,12 @@ def run(args):
 
     words, indices = load_data(args.train_path)
     timeseries = preprocess(args.train_path, words)
-    train(model, timeseries, indices, words, args)
+    #train(model, timeseries, indices, words, args)
 
     words, _ = load_data(args.test_path)
     timeseries = preprocess(args.test_path, words)
     #cel_perplexity(model, timeseries, indices, words, args)
-    #nll_perplexity(model, timeseries, indices, words, args)
+    nll_perplexity(model, timeseries, indices, words, args)
 
 
 def generator(timeseries, indices, words, args, top=-1, bot=1):
@@ -192,21 +192,21 @@ def train(model, timeseries, indices, words, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=512, type=int,
+    parser.add_argument('--batch_size', default=1024, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=13,
+    parser.add_argument('--depth', type=int, default=22,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
-    parser.add_argument('--nb_filter', type=int, default=512,
+    parser.add_argument('--nb_filter', type=int, default=128,
                         help='Initial number of conv filters')
-    parser.add_argument('--growth_rate', type=int, default=64,
+    parser.add_argument('--growth_rate', type=int, default=32,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.4,
+    parser.add_argument('--dropout_rate', type=float, default=0.6,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.1,
+    parser.add_argument('--learning_rate', type=float, default=0.01,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='L2 regularization on weights')
