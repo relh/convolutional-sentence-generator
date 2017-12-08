@@ -182,10 +182,6 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
     x = Activation('relu')(x)
     x = GlobalAveragePooling1D()(x)
     # Do cascade up
-    x = Dense(500,
-              activation='relu',
-              kernel_regularizer=l2(weight_decay),
-              bias_regularizer=l2(weight_decay))(x)
     x = Dense(nb_classes,
               activation='softmax',
               kernel_regularizer=l2(weight_decay),

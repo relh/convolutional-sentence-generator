@@ -21,8 +21,10 @@ from fastText import tokenize
 import densenet
 
 mode = 'char'
-version = '2v1'
+version = '2v2'
 name = 'models/' + version
+word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
+
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
 lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=0.00001, verbose=1)
@@ -81,7 +83,7 @@ def nll_perplexity(model, timeseries, indices, words, args):
 
 def load_data(path):
     counts = defaultdict(int)
-    with open(path) as f:
+    with open('data/billion_word/training-monolingual.tokenized.shuffled/'+path) as f:
       if mode == 'word':
         words = tokenize(f.read())
       else:
@@ -106,7 +108,7 @@ def load_data(path):
 
 
 def preprocess(path, words, indices):
-    vec_path = path.split('.')[0]+'_'+mode
+    vec_path = 'data/'+path.split('/')[-1].split('.')[0]+'_'+mode
     if os.path.exists(vec_path+'.npy'):
       np_vecs = np.load(vec_path+'.npy')
     else:
@@ -119,12 +121,12 @@ def preprocess(path, words, indices):
           f = load_model('wiki.en.bin')
           vec = f.get_word_vector(w)
         else:
-          vec = eye[indices.keys().index(w)]
+          vec = eye[indices[w]]
         vecs.append(vec) 
-        if i % 1000 == 0:
+        if i % 10000 == 0:
           print("{} / {}".format(i, words_len))
-        np_vecs = np.asarray(vecs)
-        np.save(vec_path, np_vecs)
+      np_vecs = np.asarray(vecs, dtype=np.int8)
+      np.save(vec_path, np_vecs)
     return np_vecs
 
 
@@ -168,12 +170,12 @@ def run(args):
     # Network training #
     ####################
 
-    #train(model, timeseries, indices, words, args)
+    train(model, timeseries, indices, words, args)
 
-    words, _ = load_data(args.test_path)
-    timeseries = preprocess(args.test_path, words)
+    words, indices = load_data(args.test_path)
+    timeseries = preprocess(args.test_path, words, indices)
     #cel_perplexity(model, timeseries, indices, words, args)
-    nll_perplexity(model, timeseries, indices, words, args)
+    #nll_perplexity(model, timeseries, indices, words, args)
 
 
 def generator(timeseries, indices, words, args, top=-1, bot=1):
@@ -205,11 +207,11 @@ def train(model, timeseries, indices, words, args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=1024, type=int,
+    parser.add_argument('--batch_size', default=128, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=22,
+    parser.add_argument('--depth', type=int, default=13,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
@@ -219,21 +221,21 @@ if __name__ == '__main__':
                         help='Number of new filters added by conv layers')
     parser.add_argument('--dropout_rate', type=float, default=0.6,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.001,
+    parser.add_argument('--learning_rate', type=float, default=0.1,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
-    parser.add_argument('--test_path', type=str, default='data/train.txt',
+    parser.add_argument('--test_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00002-of-00100',
                         help='Specify file path to train on')
-    parser.add_argument('--train_path', type=str, default='data/test.txt',
+    parser.add_argument('--train_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00001-of-00100',
                         help='Specify file path to test on')
-    parser.add_argument('--window_size', type=int, default=100,
+    parser.add_argument('--window_size', type=int, default=500,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
                         help='Number of classes')
-    parser.add_argument('--img_dim', type=tuple, default=(100, 300),
+    parser.add_argument('--img_dim', type=tuple, default=(100, 190),
                         help='Image dimension, i.e. width by channels for text')
     parser.add_argument('--epoch_steps', type=int, default=500,
                         help='Steps in an epoch')
@@ -254,7 +256,9 @@ if __name__ == '__main__':
 
     """
     args = parser.parse_args()
-    args.img_dim = (args.window_size, 300)
+    args.img_dim = (args.window_size, args.img_dim[1])
+    args.train_path = random.choice(os.listdir(word_folder))
+    args.test_path = random.choice(os.listdir(word_folder))
 
     print("Network configuration:")
     for key, value in parser.parse_args()._get_kwargs():
