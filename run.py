@@ -21,9 +21,11 @@ from fastText import tokenize
 import densenet
 
 mode = 'char'
-version = '2v2'
+version = '2v3'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
+eye = np.eye(190) #len(indices.keys()))
+
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -36,28 +38,30 @@ def perplexity(y_true, y_pred):
     return perplexity
 
 
-def cel_perplexity(model, timeseries, indices, words, args):
+def char_to_perplexity(model, timeseries, indices, words, args):
     accum = 0
     words_len = len(words)-args.window_size
     batches = words_len / args.batch_size
     print(batches)
-    for start in range(0, batches):
+    for start in range(0, 500): #batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np_utils.to_categorical(np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]]), args.nb_classes)
+      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
       
-      pred, _, _ = model.evaluate(inp, label)
+      preds = model.evaluate(inp, label)
+      pred = preds[0]
       accum += pred 
       if start % 5 == 0:
         print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
     print(accum)
-    avg = accum / (batches) 
-    print(avg)
-    perplex = np.exp(2.0, avg)
+    avg = accum / 500 #(batches) 
+    print(avg) # avg is bit per character
+    perplex = np.power(2.0, (avg*(190/793471.0)))
     print(perplex)
+    # char -> word PPL=2^(BPC*Nc/Nw)
 
 
-def nll_perplexity(model, timeseries, indices, words, args):
+def word_to_perplexity(model, timeseries, indices, words, args):
     accum = 0
     words_len = len(words)-args.window_size
     batches = words_len / args.batch_size
@@ -65,7 +69,7 @@ def nll_perplexity(model, timeseries, indices, words, args):
     for start in range(0, batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])
+      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
       
       pred = model.predict(inp)
       lp = np.log(pred)
@@ -83,7 +87,7 @@ def nll_perplexity(model, timeseries, indices, words, args):
 
 def load_data(path):
     counts = defaultdict(int)
-    with open('data/billion_word/training-monolingual.tokenized.shuffled/'+path) as f:
+    with open(path) as f:
       if mode == 'word':
         words = tokenize(f.read())
       else:
@@ -114,8 +118,6 @@ def preprocess(path, words, indices):
     else:
       words_len = len(words)
       vecs = []
-      if mode != 'word':
-        eye = np.eye(len(indices.keys()))
       for i, w in enumerate(words):
         if mode == 'word':
           f = load_model('wiki.en.bin')
@@ -170,23 +172,29 @@ def run(args):
     # Network training #
     ####################
 
-    train(model, timeseries, indices, words, args)
+    #train(model, timeseries, indices, words, args)
 
-    words, indices = load_data(args.test_path)
-    timeseries = preprocess(args.test_path, words, indices)
-    #cel_perplexity(model, timeseries, indices, words, args)
-    #nll_perplexity(model, timeseries, indices, words, args)
+    #words, indices = load_data(args.test_path)
+    #timeseries = preprocess(args.test_path, words, indices)
+    #char_to_perplexity(model, timeseries, indices, words, args) #cel
+    #word_to_perplexity(model, timeseries, indices, words, args) #nll
+    inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+    model.predict(inp)
+    
 
 
-def generator(timeseries, indices, words, args, top=-1, bot=1):
-    print(top)
+def generator(timeseries, indices, words, args, bot=1, top=-1):
     if top < 0:
       top = len(timeseries)
+    #start = bot
+    start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
     while True:
         # choose random index in features
-        start = random.choice(range(bot, top)) #len(timeseries)-window_size,1)
+        start += args.window_size+args.batch_size
+        if start >= (top-args.batch_size-args.window_size):
+          start = bot
         batch_features = np.array([timeseries[i:i+args.window_size] for i in range(start, start+args.batch_size)])
-        batch_labels = np_utils.to_categorical(np.asarray([indices[x] for x in words[start+args.window_size:start+args.window_size+args.batch_size]]), args.nb_classes)
+        batch_labels = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
 
         yield batch_features, batch_labels
 
@@ -201,17 +209,17 @@ def train(model, timeseries, indices, words, args):
     top = len(timeseries)-args.window_size-args.batch_size-int(len(timeseries)*0.05)
     print("--- Model Version: {} ---".format(name))
     print("Number of words in training set: {}".format(top))
-    model.fit_generator(generator(timeseries, indices, words, args, top, 1), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, len(timeseries)-args.window_size-args.batch_size, top), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=False)
+    model.fit_generator(generator(timeseries, indices, words, args, 1, top), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, top, len(timeseries)-args.window_size-args.batch_size), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=False)
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=128, type=int,
+    parser.add_argument('--batch_size', default=256, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
-    parser.add_argument('--depth', type=int, default=13,
+    parser.add_argument('--depth', type=int, default=22,
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
@@ -223,7 +231,7 @@ if __name__ == '__main__':
                         help='Dropout rate')
     parser.add_argument('--learning_rate', type=float, default=0.1,
                         help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.0001,
+    parser.add_argument('--weight_decay', type=float, default=0.001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
@@ -237,9 +245,9 @@ if __name__ == '__main__':
                         help='Number of classes')
     parser.add_argument('--img_dim', type=tuple, default=(100, 190),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=500,
+    parser.add_argument('--epoch_steps', type=int, default=250,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=200,
+    parser.add_argument('--val_steps', type=int, default=100,
                         help='Steps in an epoch')
     """ Run Conv NLP experiments
 
@@ -257,8 +265,8 @@ if __name__ == '__main__':
     """
     args = parser.parse_args()
     args.img_dim = (args.window_size, args.img_dim[1])
-    args.train_path = random.choice(os.listdir(word_folder))
-    args.test_path = random.choice(os.listdir(word_folder))
+    #args.train_path = random.choice(os.listdir(word_folder))
+    #args.test_path = random.choice(os.listdir(word_folder))
 
     print("Network configuration:")
     for key, value in parser.parse_args()._get_kwargs():
