@@ -20,7 +20,8 @@ from fastText import tokenize
 
 import densenet
 
-version = 'v35'
+mode = 'char'
+version = '2v1'
 name = 'models/' + version
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -79,15 +80,18 @@ def nll_perplexity(model, timeseries, indices, words, args):
 
 
 def load_data(path):
-    with open(path) as f:
-      words = tokenize(f.read())
-
     counts = defaultdict(int)
+    with open(path) as f:
+      if mode == 'word':
+        words = tokenize(f.read())
+      else:
+        words = f.read()
+
     for word in words:
       counts[word] += 1 
 
-    if os.path.exists('indices.p'):
-      indices = pickle.load( open( "indices.p", "rb" ) )
+    if os.path.exists(mode+'indices.p'):
+      indices = pickle.load(open(mode+'indices.p', 'rb'))
     else:
       indices = defaultdict(int)
       i = 0
@@ -95,34 +99,45 @@ def load_data(path):
         indices[word] = i
         i += 1
       print("i is: " + str(i))
-      pickle.dump( indices, open( "indices.p", "wb" ) )
+      pickle.dump(indices, open(mode+'indices.p', 'wb'))
 
     words = [x for x in words if len(x) > 0]
     return words, indices
 
 
-def preprocess(path, words):
-    vec_path = path.split('.')[0]
+def preprocess(path, words, indices):
+    vec_path = path.split('.')[0]+'_'+mode
     if os.path.exists(vec_path+'.npy'):
       np_vecs = np.load(vec_path+'.npy')
     else:
       words_len = len(words)
-      
-      f = load_model('wiki.en.bin')
-
       vecs = []
+      if mode != 'word':
+        eye = np.eye(len(indices.keys()))
       for i, w in enumerate(words):
+        if mode == 'word':
+          f = load_model('wiki.en.bin')
           vec = f.get_word_vector(w)
-          vecs.append(vec) 
-          if i % 1000 == 0:
-            print("{} / {}".format(i, words_len))
-
-      np_vecs = np.asarray(vecs)
-      np.save(vec_path, np_vecs)
+        else:
+          vec = eye[indices.keys().index(w)]
+        vecs.append(vec) 
+        if i % 1000 == 0:
+          print("{} / {}".format(i, words_len))
+        np_vecs = np.asarray(vecs)
+        np.save(vec_path, np_vecs)
     return np_vecs
 
 
 def run(args):
+    ####################
+    # Data Processing  #
+    ####################
+
+    words, indices = load_data(args.train_path)
+    args.nb_classes = len(indices.keys())
+    print(len(indices.keys()))
+    timeseries = preprocess(args.train_path, words, indices)
+
     ###################
     # Construct model #
     ###################
@@ -153,8 +168,6 @@ def run(args):
     # Network training #
     ####################
 
-    words, indices = load_data(args.train_path)
-    timeseries = preprocess(args.train_path, words)
     #train(model, timeseries, indices, words, args)
 
     words, _ = load_data(args.test_path)
@@ -206,7 +219,7 @@ if __name__ == '__main__':
                         help='Number of new filters added by conv layers')
     parser.add_argument('--dropout_rate', type=float, default=0.6,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.01,
+    parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='L2 regularization on weights')

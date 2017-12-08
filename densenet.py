@@ -151,7 +151,7 @@ def DenseNet(nb_classes, img_dim, depth, nb_dense_block, growth_rate,
     nb_layers = int((depth - 4) / 3)
 
     # Initial convolution
-    x = Conv1D(nb_filter, 5,
+    x = Conv1D(nb_filter, 3,
                kernel_initializer="he_uniform",
                padding="same",
                name="initial_conv1D",
