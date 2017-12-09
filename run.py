@@ -20,11 +20,10 @@ from fastText import tokenize
 
 import densenet
 
-mode = 'char'
-version = '2v3'
+mode = 'word'
+version = '3v2'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
-eye = np.eye(190) #len(indices.keys()))
 
 
 # val_perplexity
@@ -69,7 +68,7 @@ def word_to_perplexity(model, timeseries, indices, words, args):
     for start in range(0, batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
+      label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])  
       
       pred = model.predict(inp)
       lp = np.log(pred)
@@ -87,14 +86,22 @@ def word_to_perplexity(model, timeseries, indices, words, args):
 
 def load_data(path):
     counts = defaultdict(int)
-    with open(path) as f:
-      if mode == 'word':
-        words = tokenize(f.read())
-      else:
-        words = f.read()
+    if not os.path.exists(mode+'indices.p'):
+      root = '/'.join(path.split('/')[0:-1])
+      all_paths = [root+'/'+x for x in os.listdir(root)] #'/'.join(path.split('/')[0:-1]))
+    else:
+      all_paths = [path]
+    
+    for path in all_paths:
+      print(path)
+      with open(path) as f:
+        if mode == 'word':
+          words = tokenize(f.read())
+        else:
+          words = f.read()
 
-    for word in words:
-      counts[word] += 1 
+        for word in words:
+          counts[word] += 1 
 
     if os.path.exists(mode+'indices.p'):
       indices = pickle.load(open(mode+'indices.p', 'rb'))
@@ -118,9 +125,10 @@ def preprocess(path, words, indices):
     else:
       words_len = len(words)
       vecs = []
+      if mode == 'word':
+        f = load_model('wiki.en.bin')
       for i, w in enumerate(words):
         if mode == 'word':
-          f = load_model('wiki.en.bin')
           vec = f.get_word_vector(w)
         else:
           vec = eye[indices[w]]
@@ -172,14 +180,14 @@ def run(args):
     # Network training #
     ####################
 
-    #train(model, timeseries, indices, words, args)
+    train(model, timeseries, indices, words, args)
 
     #words, indices = load_data(args.test_path)
     #timeseries = preprocess(args.test_path, words, indices)
     #char_to_perplexity(model, timeseries, indices, words, args) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
-    inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-    model.predict(inp)
+    #inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+    #model.predict(inp)
     
 
 
@@ -194,7 +202,10 @@ def generator(timeseries, indices, words, args, bot=1, top=-1):
         if start >= (top-args.batch_size-args.window_size):
           start = bot
         batch_features = np.array([timeseries[i:i+args.window_size] for i in range(start, start+args.batch_size)])
-        batch_labels = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
+        if mode == 'word':
+          batch_labels = np_utils.to_categorical(np.asarray([indices[x] for x in words[start+args.window_size:start+args.window_size+args.batch_size]]), args.nb_classes)
+        else:
+          batch_labels = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
 
         yield batch_features, batch_labels
 
@@ -239,11 +250,11 @@ if __name__ == '__main__':
                         help='Specify file path to train on')
     parser.add_argument('--train_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00001-of-00100',
                         help='Specify file path to test on')
-    parser.add_argument('--window_size', type=int, default=500,
+    parser.add_argument('--window_size', type=int, default=100,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
                         help='Number of classes')
-    parser.add_argument('--img_dim', type=tuple, default=(100, 190),
+    parser.add_argument('--img_dim', type=tuple, default=(100, 300),
                         help='Image dimension, i.e. width by channels for text')
     parser.add_argument('--epoch_steps', type=int, default=250,
                         help='Steps in an epoch')
