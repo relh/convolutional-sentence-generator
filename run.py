@@ -20,11 +20,11 @@ from fastText import tokenize
 
 import densenet
 
-mode = 'word'
-version = '3v2'
+mode = 'char'
+version = '3v4'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
-
+eye = np.eye(190)
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -84,7 +84,7 @@ def word_to_perplexity(model, timeseries, indices, words, args):
     print(perplex)
 
 
-def load_data(path):
+def load_input(path):
     counts = defaultdict(int)
     if not os.path.exists(mode+'indices.p'):
       root = '/'.join(path.split('/')[0:-1])
@@ -103,6 +103,11 @@ def load_data(path):
         for word in words:
           counts[word] += 1 
 
+    words = [x for x in words if len(x) > 0]
+    return words, counts
+
+
+def load_indices(words, counts):
     if os.path.exists(mode+'indices.p'):
       indices = pickle.load(open(mode+'indices.p', 'rb'))
     else:
@@ -113,13 +118,15 @@ def load_data(path):
         i += 1
       print("i is: " + str(i))
       pickle.dump(indices, open(mode+'indices.p', 'wb'))
-
-    words = [x for x in words if len(x) > 0]
-    return words, indices
+    return indices
 
 
-def preprocess(path, words, indices):
-    vec_path = 'data/'+path.split('/')[-1].split('.')[0]+'_'+mode
+def make_embedding(path, words, indices):
+    #root = '/'.join(path.split('/')[0:-1])
+    #all_paths = [root+'/'+x for x in os.listdir(root)] #'/'.join(path.split('/')[0:-1]))
+    #for path in all_paths:
+    vec_path = 'data/'+path.split('/')[-1]+'_'+mode
+    print(vec_path)
     if os.path.exists(vec_path+'.npy'):
       np_vecs = np.load(vec_path+'.npy')
     else:
@@ -145,17 +152,18 @@ def run(args):
     # Data Processing  #
     ####################
 
-    words, indices = load_data(args.train_path)
+    words, counts = load_input(args.train_path)
+    indices = load_indices(words, counts)
     args.nb_classes = len(indices.keys())
     print(len(indices.keys()))
-    timeseries = preprocess(args.train_path, words, indices)
+    timeseries = make_embedding(args.train_path, words, indices)
 
     ###################
     # Construct model #
     ###################
 
     if os.path.exists(name+'.h5'):
-      model = keras_load_model(name+'.h5', custom_objects={'perplexity': perplexity})
+      model = keras_load_model(name+'.h5')#', custom_objects={'perplexity': perplexity})
       model.summary()
     else:
       model = densenet.DenseNet(args.nb_classes,
@@ -174,7 +182,7 @@ def run(args):
 
       model.compile(loss='categorical_crossentropy',
                     optimizer=opt,
-                    metrics=[perplexity, 'mae', 'accuracy'])
+                    metrics=['mae', 'accuracy'])
 
     ####################
     # Network training #
@@ -182,8 +190,8 @@ def run(args):
 
     train(model, timeseries, indices, words, args)
 
-    #words, indices = load_data(args.test_path)
-    #timeseries = preprocess(args.test_path, words, indices)
+    #words, counts = load_input(args.train_path)
+    #timeseries = make_embedding(args.train_path, words, indices)
     #char_to_perplexity(model, timeseries, indices, words, args) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
     #inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
@@ -192,6 +200,7 @@ def run(args):
 
 
 def generator(timeseries, indices, words, args, bot=1, top=-1):
+    fil = 0
     if top < 0:
       top = len(timeseries)
     #start = bot
@@ -220,13 +229,13 @@ def train(model, timeseries, indices, words, args):
     top = len(timeseries)-args.window_size-args.batch_size-int(len(timeseries)*0.05)
     print("--- Model Version: {} ---".format(name))
     print("Number of words in training set: {}".format(top))
-    model.fit_generator(generator(timeseries, indices, words, args, 1, top), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, top, len(timeseries)-args.window_size-args.batch_size), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=False)
+    model.fit_generator(generator(timeseries, indices, words, args, 1, top), steps_per_epoch=args.epoch_steps, epochs=args.nb_epoch, validation_data=generator(timeseries, indices, words, args, top, len(timeseries)-args.window_size-args.batch_size), validation_steps=args.val_steps, callbacks=[lr_reducer, checkpointer], shuffle=True)
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run NLP experiment')
-    parser.add_argument('--batch_size', default=256, type=int,
+    parser.add_argument('--batch_size', default=128, type=int,
                         help='Batch size')
     parser.add_argument('--nb_epoch', default=25000, type=int,
                         help='Number of epochs')
@@ -234,13 +243,13 @@ if __name__ == '__main__':
                         help='Network depth')
     parser.add_argument('--nb_dense_block', type=int, default=1,
                         help='Number of dense blocks')
-    parser.add_argument('--nb_filter', type=int, default=128,
+    parser.add_argument('--nb_filter', type=int, default=512,
                         help='Initial number of conv filters')
-    parser.add_argument('--growth_rate', type=int, default=32,
+    parser.add_argument('--growth_rate', type=int, default=128,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.6,
+    parser.add_argument('--dropout_rate', type=float, default=0.4,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.1,
+    parser.add_argument('--learning_rate', type=float, default=0.01,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.001,
                         help='L2 regularization on weights')
@@ -248,17 +257,17 @@ if __name__ == '__main__':
                         help='Save a plot of the network architecture')
     parser.add_argument('--test_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00002-of-00100',
                         help='Specify file path to train on')
-    parser.add_argument('--train_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00001-of-00100',
+    parser.add_argument('--train_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00003-of-00100',
                         help='Specify file path to test on')
-    parser.add_argument('--window_size', type=int, default=100,
+    parser.add_argument('--window_size', type=int, default=500,
                         help='How many words to use as context')
     parser.add_argument('--nb_classes', type=int, default=10000,
                         help='Number of classes')
-    parser.add_argument('--img_dim', type=tuple, default=(100, 300),
+    parser.add_argument('--img_dim', type=tuple, default=(500, 190),
                         help='Image dimension, i.e. width by channels for text')
-    parser.add_argument('--epoch_steps', type=int, default=250,
+    parser.add_argument('--epoch_steps', type=int, default=1000,
                         help='Steps in an epoch')
-    parser.add_argument('--val_steps', type=int, default=100,
+    parser.add_argument('--val_steps', type=int, default=300,
                         help='Steps in an epoch')
     """ Run Conv NLP experiments
 
