@@ -2,6 +2,7 @@ from __future__ import print_function
 
 from collections import defaultdict
 import os
+import math
 import pickle
 import time
 import json
@@ -27,7 +28,7 @@ version = '3v6'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
 eye = np.eye(190)
-final_probs = np.zeros(10000)#len(counts.keys()))
+final_probs = np.zeros((128, 10000))#len(counts.keys()))
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -39,49 +40,56 @@ def perplexity(y_true, y_pred):
     perplexity = K.pow(2.0, cross_entropy)
     return perplexity
 
-
+total = 0
 def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, inp):
+  global total
+  total += 1
   num = 0
   for let in charinds.keys():
-    inp[0][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
+    for batch_i in range(128): #args.batch_size:
+      inp[batch_i][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
     keys = trie.keys(prefix+let)
     num = len(trie.keys(prefix+let))
     if num == 1:
-        print(probs)
-        final_probs[wordinds[keys[0]]] = cum*probs[0][charinds[let]]
+        final_probs[:, wordinds[keys[0]]] = np.multiply(cum, probs[:,charinds[let]])
     elif num > 1:
-        probs = model.predict(inp)
+        probs = model.predict(inp, batch_size=128)
         new_inp = np.roll(inp, -1, 1) # change back to 1dx
       
-        cum = cum*probs[0][charinds[let]]
+        cum = np.multiply(cum, probs[:, charinds[let]])
         trie_recurse(wordinds, charinds, prefix+let, probs, cum, trie, model, new_inp)
-
+  print("{} / {}. Total".format(total, 8500))
 
 def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
     accum = 0
     words_len = len(words)-args.window_size
-    batches = words_len / args.batch_size
+    batches = math.floor(words_len / args.batch_size)
     print(batches)
     for start in range(0, 1): # 500batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
       label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
+      print([x for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
       
-      inp = np.expand_dims(inp[0], 0)
-      print(inp)
-      preds = model.predict(inp)#, label)
+      #inp = np.expand_dims(inp[0], 0)
+      preds = model.predict(inp, batch_size=128)#, label)
+      print(preds.shape)
       new_inp = np.roll(inp, -1, 1) # change back to 1dx
       
-      print(new_inp)
-    
-      pred = preds[0]
-      accum += pred 
+      print(new_inp.shape)
 
-    # Calc softmax for all words
-    trie_recurse(wordinds, indices, '', preds[0], 1.0, trie, model, new_inp)
+      # Calc softmax for all words
+      cum = np.ones(128)
+      #trie_recurse(wordinds, indices, '', preds, cum, trie, model, new_inp)
 
-    print(final_probs)
-    print(sum(final_probs))
+      print(final_probs)
+      print(sum(final_probs))
+      np_vecs = np.asarray(final_probs, dtype=np.int8)
+      print(np_vecs.shape)
+      print(label.shape)
+      np.save('final_probs', np_vecs)
+      np.save('final_labels', label)
+
     """
       if start % 5 == 0:
         print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
@@ -97,14 +105,14 @@ def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
 def word_to_perplexity(model, timeseries, indices, words, args):
     accum = 0
     words_len = len(words)-args.window_size
-    batches = words_len / args.batch_size
+    batches = math.floor(words_len / args.batch_size)
     print(batches)
     for start in range(0, batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
       label = np.asarray([indices[x] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])  
       
-      pred = model.predict(inp)
+      pred = model.predict(inp, batch_size=128)
       lp = np.log(pred)
       for i, ent in enumerate(lp):
         accum += ent[label[i]]
