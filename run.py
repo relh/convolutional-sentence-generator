@@ -15,16 +15,19 @@ from keras.callbacks import ReduceLROnPlateau, Callback, ModelCheckpoint
 from keras.optimizers import Nadam
 from keras.utils import np_utils
 
+import marisa_trie
+
 from fastText import load_model
 from fastText import tokenize
 
 import densenet
 
 mode = 'char'
-version = '3v4'
+version = '3v6'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
 eye = np.eye(190)
+final_probs = np.zeros(10000)#len(counts.keys()))
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -37,19 +40,49 @@ def perplexity(y_true, y_pred):
     return perplexity
 
 
-def char_to_perplexity(model, timeseries, indices, words, args):
+def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, inp):
+  num = 0
+  for let in charinds.keys():
+    inp[0][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
+    keys = trie.keys(prefix+let)
+    num = len(trie.keys(prefix+let))
+    if num == 1:
+        print(probs)
+        final_probs[wordinds[keys[0]]] = cum*probs[0][charinds[let]]
+    elif num > 1:
+        probs = model.predict(inp)
+        new_inp = np.roll(inp, -1, 1) # change back to 1dx
+      
+        cum = cum*probs[0][charinds[let]]
+        trie_recurse(wordinds, charinds, prefix+let, probs, cum, trie, model, new_inp)
+
+
+def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
     accum = 0
     words_len = len(words)-args.window_size
     batches = words_len / args.batch_size
     print(batches)
-    for start in range(0, 500): #batches):
+    for start in range(0, 1): # 500batches):
       idx = start*args.batch_size
       inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
       label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
       
-      preds = model.evaluate(inp, label)
+      inp = np.expand_dims(inp[0], 0)
+      print(inp)
+      preds = model.predict(inp)#, label)
+      new_inp = np.roll(inp, -1, 1) # change back to 1dx
+      
+      print(new_inp)
+    
       pred = preds[0]
       accum += pred 
+
+    # Calc softmax for all words
+    trie_recurse(wordinds, indices, '', preds[0], 1.0, trie, model, new_inp)
+
+    print(final_probs)
+    print(sum(final_probs))
+    """
       if start % 5 == 0:
         print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
     print(accum)
@@ -58,6 +91,7 @@ def char_to_perplexity(model, timeseries, indices, words, args):
     perplex = np.power(2.0, (avg*(190/793471.0)))
     print(perplex)
     # char -> word PPL=2^(BPC*Nc/Nw)
+    """
 
 
 def word_to_perplexity(model, timeseries, indices, words, args):
@@ -84,6 +118,16 @@ def word_to_perplexity(model, timeseries, indices, words, args):
     print(perplex)
 
 
+def load_trie(counts):
+    if os.path.exists('words_trie.marisa'):
+      trie = marisa_trie.Trie()
+      trie.load('words_trie.marisa')
+    else:
+      trie = marisa_trie.Trie(counts.keys())
+      trie.save('words_trie.marisa')
+    return trie
+
+
 def load_input(path):
     counts = defaultdict(int)
     if not os.path.exists(mode+'indices.p'):
@@ -107,16 +151,18 @@ def load_input(path):
     return words, counts
 
 
-def load_indices(words, counts):
+def load_indices(mode='char', words=None, counts=None):
     if os.path.exists(mode+'indices.p'):
-      indices = pickle.load(open(mode+'indices.p', 'rb'))
+      indices = pickle.load(open(mode+'indices.p', 'rb'), encoding='latin1')
     else:
-      indices = defaultdict(int)
+      indices = {}
       i = 0
       for word in counts.keys():
-        indices[word] = i
+        indices[word] = int(i)
+        indices[i] = str(word)
         i += 1
       print("i is: " + str(i))
+      print("len is: " + str(len(indices.keys())))
       pickle.dump(indices, open(mode+'indices.p', 'wb'))
     return indices
 
@@ -153,7 +199,8 @@ def run(args):
     ####################
 
     words, counts = load_input(args.train_path)
-    indices = load_indices(words, counts)
+    trie = marisa_trie.Trie(counts.keys())
+    indices = load_indices('word', words, counts)
     args.nb_classes = len(indices.keys())
     print(len(indices.keys()))
     timeseries = make_embedding(args.train_path, words, indices)
@@ -188,11 +235,13 @@ def run(args):
     # Network training #
     ####################
 
-    train(model, timeseries, indices, words, args)
+    #train(model, timeseries, indices, words, args)
 
-    #words, counts = load_input(args.train_path)
-    #timeseries = make_embedding(args.train_path, words, indices)
-    #char_to_perplexity(model, timeseries, indices, words, args) #cel
+    #words, counts = load_input(args.test_path)
+    #timeseries = make_embedding(args.test_path, words, indices)
+    trie = load_trie(counts)
+    charinds = load_indices('char')
+    char_to_perplexity(model, timeseries, indices, charinds, words, args, trie) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
     #inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
     #model.predict(inp)
@@ -247,17 +296,17 @@ if __name__ == '__main__':
                         help='Initial number of conv filters')
     parser.add_argument('--growth_rate', type=int, default=128,
                         help='Number of new filters added by conv layers')
-    parser.add_argument('--dropout_rate', type=float, default=0.4,
+    parser.add_argument('--dropout_rate', type=float, default=0.5,
                         help='Dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.01,
+    parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.001,
                         help='L2 regularization on weights')
     parser.add_argument('--plot_architecture', type=bool, default=False,
                         help='Save a plot of the network architecture')
-    parser.add_argument('--test_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00002-of-00100',
+    parser.add_argument('--test_path', type=str, default='data/test.txt',
                         help='Specify file path to train on')
-    parser.add_argument('--train_path', type=str, default='data/billion_word/training-monolingual.tokenized.shuffled/news.en-00003-of-00100',
+    parser.add_argument('--train_path', type=str, default='data/train.txt',
                         help='Specify file path to test on')
     parser.add_argument('--window_size', type=int, default=500,
                         help='How many words to use as context')
@@ -269,7 +318,8 @@ if __name__ == '__main__':
                         help='Steps in an epoch')
     parser.add_argument('--val_steps', type=int, default=300,
                         help='Steps in an epoch')
-    """ Run Conv NLP experiments
+    """ Run Conv NLP experiments 
+    billion_word/training-monolingual.tokenized.shuffled/news.en-00001-of-00100
 
     :param batch_size: int -- batch size
     :param nb_epoch: int -- number of training epochs
