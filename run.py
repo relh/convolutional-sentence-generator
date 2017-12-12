@@ -28,7 +28,7 @@ version = '3v6'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
 eye = np.eye(190)
-final_probs = np.zeros((128, 10000))#len(counts.keys()))
+final_probs = np.zeros((1, 10000))#len(counts.keys()))
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -41,24 +41,39 @@ def perplexity(y_true, y_pred):
     return perplexity
 
 total = 0
-def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, inp):
+def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, new_inp):
   global total
   total += 1
   num = 0
   for let in charinds.keys():
-    for batch_i in range(128): #args.batch_size:
-      inp[batch_i][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
+    #for batch_i in range(128): #args.batch_size:
+    new_inp[0][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
     keys = trie.keys(prefix+let)
     num = len(trie.keys(prefix+let))
     if num == 1:
-        final_probs[:, wordinds[keys[0]]] = np.multiply(cum, probs[:,charinds[let]])
+        final_probs[0][wordinds[keys[0]]] = np.multiply(cum, probs[0][charinds[let]])
     elif num > 1:
-        probs = model.predict(inp, batch_size=128)
-        new_inp = np.roll(inp, -1, 1) # change back to 1dx
+        probs = model.predict(new_inp)
+        new_inp = np.roll(new_inp, -1, 1) # change back to 1dx
       
-        cum = np.multiply(cum, probs[:, charinds[let]])
+        cum = np.multiply(cum, probs[0][charinds[let]])
         trie_recurse(wordinds, charinds, prefix+let, probs, cum, trie, model, new_inp)
   print("{} / {}. Total".format(total, 8500))
+
+def check_pred(model, indices, inp):
+    preds = model.predict(inp)#, label)
+    print(np.argmax(preds))
+    for k,v in indices.items():
+      if v ==  np.argmax(preds):
+        print(k)
+        new_inp = np.roll(inp, -1, 1) # change back to 1dx
+        new_inp[0][-1] = eye[indices[k]]#preds[0] # change back to 1dx
+    return new_inp
+
+
+def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
+    pass
+
 
 def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
     accum = 0
@@ -66,40 +81,43 @@ def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
     batches = math.floor(words_len / args.batch_size)
     print(batches)
     for start in range(0, 1): # 500batches):
-      idx = start*args.batch_size
-      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
-      print([x for x in words[start+args.window_size:start+args.window_size+args.batch_size]])
+      #idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(start+args.batch_size, start+args.batch_size+1)])
+      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size+args.batch_size:start+args.window_size+args.batch_size+1]])
+      print([x for x in words[start+args.window_size+args.batch_size:start+args.window_size+args.batch_size+1]])
       
-      #inp = np.expand_dims(inp[0], 0)
-      preds = model.predict(inp, batch_size=128)#, label)
-      print(preds.shape)
+      preds = model.predict(inp)#, label)
       new_inp = np.roll(inp, -1, 1) # change back to 1dx
-      
-      print(new_inp.shape)
+      #new_inp = np.expand_dims(inp[0], 0)
+      #new_inp = check_pred(model, indices, inp)
+      #new_inp = check_pred(model, indices, new_inp)
+      #new_inp = check_pred(model, indices, new_inp)
+      #new_inp = check_pred(model, indices, new_inp)
 
       # Calc softmax for all words
-      cum = np.ones(128)
+      cum = np.ones(1)
       #trie_recurse(wordinds, indices, '', preds, cum, trie, model, new_inp)
 
-      print(final_probs)
-      print(sum(final_probs))
-      np_vecs = np.asarray(final_probs, dtype=np.int8)
+      final_probie = np.load('final_probs.npy')
+      final_probie = final_probie / sum(final_probie[0])
+      print(sum(final_probie[0]))
+      print(wordinds['the'])
+      print(np.exp(-np.log(final_probie[0][wordinds['then']])))
+      print(final_probie[0][wordinds['the']])
+      print(final_probie[0][wordinds['than']])
+      print(np.argmax(final_probie[0]))
+      for k,v in wordinds.items():
+        if v == np.argmax(final_probie[0]):
+          print(k)
+      print(final_probie[0][0])
+      """
+
+      np_vecs = np.asarray(final_probs)#, dtype=np.int8)
       print(np_vecs.shape)
       print(label.shape)
       np.save('final_probs', np_vecs)
       np.save('final_labels', label)
-
-    """
-      if start % 5 == 0:
-        print("{} / {}. Perplexity so far: {}".format(start, batches, np.exp(-accum / (start*args.batch_size+1))))
-    print(accum)
-    avg = accum / 500 #(batches) 
-    print(avg) # avg is bit per character
-    perplex = np.power(2.0, (avg*(190/793471.0)))
-    print(perplex)
-    # char -> word PPL=2^(BPC*Nc/Nw)
-    """
+      """
 
 
 def word_to_perplexity(model, timeseries, indices, words, args):
