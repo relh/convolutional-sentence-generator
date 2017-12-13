@@ -5,3 +5,4 @@ nltk
 keras
 tensorflow
 gensim
+marisa-trie

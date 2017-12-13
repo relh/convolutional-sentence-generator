@@ -30,54 +30,54 @@ word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
 eye = np.eye(190)
 final_probs = np.zeros((1, 10000))
 
-# val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
 lr_reducer = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=0.00001, verbose=1)
 
 
 def perplexity(y_true, y_pred):
+    """ this metric assesses the perplexity of a prediction and truth value """
     cross_entropy = K.categorical_crossentropy(y_true, y_pred)
     perplexity = K.pow(2.0, cross_entropy)
     return perplexity
 
 
-total = 0
 def trie_recurse(wordinds, charinds, prefix, probs, cumul, trie, model, new_inp):
-  global total
-  total += 1
+  """ this method recurse through a trie and chains probabilities together
+      this method was used to experiment with a character language model
+      directly performing a 10,000 probability output """
   num = 0
   for let in charinds.keys():
-    #for batch_i in range(128): #args.batch_size:
-    new_inp[0][-1] = eye[charinds[let]]#preds[0] # change back to 1dx
+    new_inp[0][-1] = eye[charinds[let]]
     keys = trie.keys(prefix+let)
     num = len(trie.keys(prefix+let))
     if num == 1:
         final_probs[0][wordinds[keys[0]]] = np.multiply(cumul, probs[0][charinds[let]])
     elif num > 1:
         probs = model.predict(new_inp)
-        new_inp = np.roll(new_inp, -1, 1) # change back to 1dx
+        new_inp = np.roll(new_inp, -1, 1)
       
         cumul = np.multiply(cumul, probs[0][charinds[let]])
         trie_recurse(wordinds, charinds, prefix+let, probs, cumul, trie, model, new_inp)
-  print("{} / {}. Total".format(total, 8500))
 
 def gen_pred(model, indices, inp):
+    """ this method generates sentences character by character from the model """
     preds = model.predict(inp)#, label)
     print(np.argmax(preds))
     for k,v in indices.items():
       print(k)
       if v ==  np.argmax(preds):
         print(k)
-        new_inp = np.roll(inp, -1, 1) # change back to 1dx
-        new_inp[0][-1] = eye[indices[k]]#preds[0] # change back to 1dx
+        new_inp = np.roll(inp, -1, 1)
+        new_inp[0][-1] = eye[indices[k]]
     return new_inp
 
 
 def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
+    """ this method finds the bits-per-character of a character model """
     accum = 0
-    words_len = len(words)-args.window_size batches = math.floor(words_len / args.batch_size)
-    print(batches)
-    counts = pickle.load(open('superCOUNTS.p', 'rb'), encoding='latin1')
+    words_len = len(words)-args.window_size
+    batches = math.floor(words_len / args.batch_size)
+    counts = pickle.load(open('conglom_counts.p', 'rb'), encoding='latin1')
     
     for start in range(0, batches):
       idx = start*args.batch_size
@@ -101,6 +101,7 @@ def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
 
 
 def word_to_perplexity(model, timeseries, indices, words, args):
+    """ this method finds the perplexity of a word model """
     accum = 0
     words_len = len(words)-args.window_size
     batches = math.floor(words_len / args.batch_size)
@@ -120,11 +121,12 @@ def word_to_perplexity(model, timeseries, indices, words, args):
     print(accum)
     avg = accum / words_len 
     print(avg)
-    perplex = np.exp(avg)
+    perplex = np.power(avg, 2)
     print(perplex)
 
 
 def load_trie(counts):
+    """ this method loads a trie """
     if os.path.exists('words_trie.marisa'):
       trie = marisa_trie.Trie()
       trie.load('words_trie.marisa')
@@ -135,6 +137,7 @@ def load_trie(counts):
 
 
 def load_input(path):
+    """ this method loads words and their counts from an input path """
     counts = defaultdict(int)
     if not os.path.exists(mode+'indices.p'):
       root = '/'.join(path.split('/')[0:-1])
@@ -158,6 +161,7 @@ def load_input(path):
 
 
 def load_indices(mode='char', words=None, counts=None):
+    """ this method creates an index mapping for vocab or characters """
     if os.path.exists(mode+'indices.p'):
       indices = pickle.load(open(mode+'indices.p', 'rb'), encoding='latin1')
     else:
@@ -174,6 +178,7 @@ def load_indices(mode='char', words=None, counts=None):
 
 
 def make_embedding(path, words, indices):
+    """ this method makes appropriate character or word embeddings """
     #root = '/'.join(path.split('/')[0:-1])
     #all_paths = [root+'/'+x for x in os.listdir(root)] #'/'.join(path.split('/')[0:-1]))
     #for path in all_paths:
@@ -200,6 +205,7 @@ def make_embedding(path, words, indices):
 
 
 def run(args):
+    """ this method runs both training and testing """
     ####################
     # Data Processing  #
     ####################
@@ -241,17 +247,18 @@ def run(args):
     # Network training #
     ####################
 
-    #train(model, timeseries, indices, words, args)
+    train(model, timeseries, indices, words, args)
 
     #words, counts = load_input(args.test_path)
     #timeseries = make_embedding(args.test_path, words, indices)
-    trie = load_trie(counts)
-    charinds = load_indices('char')
-    char_to_bpc(model, timeseries, indices, charinds, words, args, trie) #cel
+    #trie = load_trie(counts)
+    #charinds = load_indices('char')
+    #char_to_bpc(model, timeseries, indices, charinds, words, args, trie) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
 
 
 def generator(timeseries, indices, words, args, bot=1, top=-1):
+    """ this generator provides data """
     fil = 0
     if top < 0:
       top = len(timeseries)
