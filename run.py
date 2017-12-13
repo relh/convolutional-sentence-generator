@@ -61,10 +61,11 @@ def trie_recurse(wordinds, charinds, prefix, probs, cumul, trie, model, new_inp)
         trie_recurse(wordinds, charinds, prefix+let, probs, cumul, trie, model, new_inp)
   print("{} / {}. Total".format(total, 8500))
 
-def check_pred(model, indices, inp):
+def gen_pred(model, indices, inp):
     preds = model.predict(inp)#, label)
     print(np.argmax(preds))
     for k,v in indices.items():
+      print(k)
       if v ==  np.argmax(preds):
         print(k)
         new_inp = np.roll(inp, -1, 1) # change back to 1dx
@@ -74,8 +75,7 @@ def check_pred(model, indices, inp):
 
 def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
     accum = 0
-    words_len = len(words)-args.window_size
-    batches = math.floor(words_len / args.batch_size)
+    words_len = len(words)-args.window_size batches = math.floor(words_len / args.batch_size)
     print(batches)
     counts = pickle.load(open('superCOUNTS.p', 'rb'), encoding='latin1')
     
@@ -86,6 +86,10 @@ def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
       
       # log p(X(t+1) | y(t))
       preds = model.predict(inp)#, label)
+
+      # Make a generated sentence
+      #for i in range(1000):
+      #  inp = gen_pred(model, indices, inp)
       
       accum += (sum(sum(label * preds)))
       if start % 5 == 0:
@@ -237,13 +241,13 @@ def run(args):
     # Network training #
     ####################
 
-    train(model, timeseries, indices, words, args)
+    #train(model, timeseries, indices, words, args)
 
     #words, counts = load_input(args.test_path)
     #timeseries = make_embedding(args.test_path, words, indices)
-    #trie = load_trie(counts)
-    #charinds = load_indices('char')
-    #char_to_bpc(model, timeseries, indices, charinds, words, args, trie) #cel
+    trie = load_trie(counts)
+    charinds = load_indices('char')
+    char_to_bpc(model, timeseries, indices, charinds, words, args, trie) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
 
 
