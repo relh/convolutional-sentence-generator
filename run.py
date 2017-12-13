@@ -28,7 +28,7 @@ version = '3v6'
 name = 'models/' + version
 word_folder = 'data/billion_word/training-monolingual.tokenized.shuffled/'
 eye = np.eye(190)
-final_probs = np.zeros((1, 10000))#len(counts.keys()))
+final_probs = np.zeros((1, 10000))
 
 # val_perplexity
 checkpointer = ModelCheckpoint(monitor='val_loss', filepath=name+'.h5', verbose=1, save_best_only=True)
@@ -40,8 +40,9 @@ def perplexity(y_true, y_pred):
     perplexity = K.pow(2.0, cross_entropy)
     return perplexity
 
+
 total = 0
-def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, new_inp):
+def trie_recurse(wordinds, charinds, prefix, probs, cumul, trie, model, new_inp):
   global total
   total += 1
   num = 0
@@ -51,13 +52,13 @@ def trie_recurse(wordinds, charinds, prefix, probs, cum, trie, model, new_inp):
     keys = trie.keys(prefix+let)
     num = len(trie.keys(prefix+let))
     if num == 1:
-        final_probs[0][wordinds[keys[0]]] = np.multiply(cum, probs[0][charinds[let]])
+        final_probs[0][wordinds[keys[0]]] = np.multiply(cumul, probs[0][charinds[let]])
     elif num > 1:
         probs = model.predict(new_inp)
         new_inp = np.roll(new_inp, -1, 1) # change back to 1dx
       
-        cum = np.multiply(cum, probs[0][charinds[let]])
-        trie_recurse(wordinds, charinds, prefix+let, probs, cum, trie, model, new_inp)
+        cumul = np.multiply(cumul, probs[0][charinds[let]])
+        trie_recurse(wordinds, charinds, prefix+let, probs, cumul, trie, model, new_inp)
   print("{} / {}. Total".format(total, 8500))
 
 def check_pred(model, indices, inp):
@@ -72,52 +73,27 @@ def check_pred(model, indices, inp):
 
 
 def char_to_bpc(model, timeseries, wordinds, indices, words, args, trie):
-    pass
-
-
-def char_to_perplexity(model, timeseries, wordinds, indices, words, args, trie):
     accum = 0
     words_len = len(words)-args.window_size
     batches = math.floor(words_len / args.batch_size)
     print(batches)
-    for start in range(0, 1): # 500batches):
-      #idx = start*args.batch_size
-      inp = np.array([timeseries[i:i+args.window_size] for i in range(start+args.batch_size, start+args.batch_size+1)])
-      label = np.asarray([eye[indices[x]] for x in words[start+args.window_size+args.batch_size:start+args.window_size+args.batch_size+1]])
-      print([x for x in words[start+args.window_size+args.batch_size:start+args.window_size+args.batch_size+1]])
+    counts = pickle.load(open('superCOUNTS.p', 'rb'), encoding='latin1')
+    
+    for start in range(0, batches):
+      idx = start*args.batch_size
+      inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
+      label = np.asarray([eye[indices[x]] for x in words[idx+args.window_size:idx+args.window_size+args.batch_size]])
       
+      # log p(X(t+1) | y(t))
       preds = model.predict(inp)#, label)
-      new_inp = np.roll(inp, -1, 1) # change back to 1dx
-      #new_inp = np.expand_dims(inp[0], 0)
-      #new_inp = check_pred(model, indices, inp)
-      #new_inp = check_pred(model, indices, new_inp)
-      #new_inp = check_pred(model, indices, new_inp)
-      #new_inp = check_pred(model, indices, new_inp)
-
-      # Calc softmax for all words
-      cum = np.ones(1)
-      #trie_recurse(wordinds, indices, '', preds, cum, trie, model, new_inp)
-
-      final_probie = np.load('final_probs.npy')
-      final_probie = final_probie / sum(final_probie[0])
-      print(sum(final_probie[0]))
-      print(wordinds['the'])
-      print(np.exp(-np.log(final_probie[0][wordinds['then']])))
-      print(final_probie[0][wordinds['the']])
-      print(final_probie[0][wordinds['than']])
-      print(np.argmax(final_probie[0]))
-      for k,v in wordinds.items():
-        if v == np.argmax(final_probie[0]):
-          print(k)
-      print(final_probie[0][0])
-      """
-
-      np_vecs = np.asarray(final_probs)#, dtype=np.int8)
-      print(np_vecs.shape)
-      print(label.shape)
-      np.save('final_probs', np_vecs)
-      np.save('final_labels', label)
-      """
+      
+      accum += (sum(sum(label * preds)))
+      if start % 5 == 0:
+        print("{} / {}. BPC so far: {}".format(start, batches, -np.log2(accum / (start*args.batch_size+1))))
+    avg = accum / words_len
+    print(avg)
+    bpc = -np.log2(avg) 
+    print(bpc)
 
 
 def word_to_perplexity(model, timeseries, indices, words, args):
@@ -261,17 +237,14 @@ def run(args):
     # Network training #
     ####################
 
-    #train(model, timeseries, indices, words, args)
+    train(model, timeseries, indices, words, args)
 
     #words, counts = load_input(args.test_path)
     #timeseries = make_embedding(args.test_path, words, indices)
-    trie = load_trie(counts)
-    charinds = load_indices('char')
-    char_to_perplexity(model, timeseries, indices, charinds, words, args, trie) #cel
+    #trie = load_trie(counts)
+    #charinds = load_indices('char')
+    #char_to_bpc(model, timeseries, indices, charinds, words, args, trie) #cel
     #word_to_perplexity(model, timeseries, indices, words, args) #nll
-    #inp = np.array([timeseries[i:i+args.window_size] for i in range(idx, idx+args.batch_size)])
-    #model.predict(inp)
-    
 
 
 def generator(timeseries, indices, words, args, bot=1, top=-1):
@@ -361,8 +334,6 @@ if __name__ == '__main__':
     """
     args = parser.parse_args()
     args.img_dim = (args.window_size, args.img_dim[1])
-    #args.train_path = random.choice(os.listdir(word_folder))
-    #args.test_path = random.choice(os.listdir(word_folder))
 
     print("Network configuration:")
     for key, value in parser.parse_args()._get_kwargs():
